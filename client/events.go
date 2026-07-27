@@ -692,4 +692,5 @@ const (
 	evLosingCarriableObjectStart
 	evLosingCarriableObjectFinished
 	evNotifyPlatformAccountConfirmed
+	evFactionTraderZoneBuffFailure
 )
