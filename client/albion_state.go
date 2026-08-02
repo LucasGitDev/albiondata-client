@@ -1,8 +1,8 @@
 package client
 
 import (
-	"strings"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/ao-data/albiondata-client/lib"
@@ -20,15 +20,16 @@ type marketHistoryInfo struct {
 }
 
 type albionState struct {
-	LocationId           string
-	LocationString       string
-	CharacterId          lib.CharacterID
-	CharacterName        string
-	GameServerIP         string
-	AODataServerID       int
-	AODataIngestBaseURL  string
-	WaitingForMarketData bool
+	LocationId                   string
+	LocationString               string
+	CharacterId                  lib.CharacterID
+	CharacterName                string
+	GameServerIP                 string
+	AODataServerID               int
+	AODataIngestBaseURL          string
+	WaitingForMarketData         bool
 	BanditEventLastTimeSubmitted time.Time
+	FestivitiesLastTimeSubmitted time.Time
 
 	// A lot of information is sent out but not contained in the response when requesting marketHistory (e.g. ID)
 	// This information is stored in marketHistoryInfo

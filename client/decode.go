@@ -141,6 +141,8 @@ func decodeEvent(params map[uint8]interface{}) (event operation, err error) {
 	//	event = &eventRedZonePlayerNotification{}
 	case evRedZoneWorldMapEvent:
 		event = &eventRedZoneWorldMapEvent{}
+	case evFestivitiesUpdate:
+		event = &eventFestivitiesUpdate{}
 	default:
 		return nil, nil
 	}
