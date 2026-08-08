@@ -12,6 +12,7 @@ const (
 	NatsMapDataIngest          = "mapdata.ingest"
 	NatsMapDataDeduped         = "mapdata.deduped"
 	NatsBanditEvent            = "banditevent.ingest"
+	NatsFestivitiesIngest      = "festivities.ingest"
 
 	// Private Topics
 	NatsSkillData           = "skills"
