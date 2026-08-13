@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	alog "github.com/ao-data/albiondata-client/log"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -17,6 +18,7 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	alog.AddHook(alog.NewWailsHook(ctx, nil))
 	runtime.LogInfo(ctx, "Albion Data Client started")
 }
 
