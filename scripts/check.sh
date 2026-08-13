@@ -25,9 +25,17 @@ fi
 
 FRONTEND="$ROOT/frontend"
 if [ -d "$FRONTEND" ]; then
-  echo "=== Frontend: install ==="
   cd "$FRONTEND"
+
+  echo "=== Frontend: install ==="
   npm ci --silent
+
+  # Bootstrap: build dist/ if missing so the Go embed directive doesn't fail
+  # on fresh worktrees that haven't run the frontend build yet.
+  if [ ! -d "$FRONTEND/dist" ]; then
+    echo "=== Frontend: bootstrap dist/ (first run) ==="
+    npm run build --silent
+  fi
 
   echo "=== Frontend: lint ==="
   npm run lint --if-present
