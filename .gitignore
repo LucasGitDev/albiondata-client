@@ -11,6 +11,8 @@ albiondata-client-output.txt
 config.yaml
 .secrets
 .DS_Store
+frontend/node_modules/
+frontend/dist/
 act.sh
 albiondata-client*
 buildall.sh
