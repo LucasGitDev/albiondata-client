@@ -8,13 +8,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 echo "=== Go: build ==="
-go build ./...
+go build $(go list ./... | grep -v '/frontend/')
 
 echo "=== Go: vet ==="
-go vet ./...
+go vet $(go list ./... | grep -v '/frontend/')
 
 echo "=== Go: test ==="
-go test ./...
+go test $(go list ./... | grep -v '/frontend/')
 
 if command -v golangci-lint &>/dev/null; then
   echo "=== Go: lint ==="

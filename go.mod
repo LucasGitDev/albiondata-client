@@ -14,6 +14,7 @@ require (
 	github.com/nats-io/go-nats v1.7.2
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/viper v1.21.0
+	github.com/wailsapp/wails/v2 v2.14.0
 	golang.org/x/sys v0.46.0
 	gopkg.in/toast.v1 v1.0.0-20180812000517-0a84660828b2
 )
@@ -60,7 +61,6 @@ require (
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
-	github.com/wailsapp/wails/v2 v2.14.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.39.0 // indirect
 	go.opentelemetry.io/otel/metric v1.39.0 // indirect
