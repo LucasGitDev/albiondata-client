@@ -12,14 +12,17 @@ import (
 type httpUploader struct {
 	baseURL   string
 	transport *http.Transport
+	token     string
 }
 
-// newHTTPUploader creates a new HTTP uploader
+// newHTTPUploader creates a new HTTP uploader without auth.
 func newHTTPUploader(url string) uploader {
-	return &httpUploader{
-		baseURL:   url,
-		transport: &http.Transport{},
-	}
+	return &httpUploader{baseURL: url, transport: &http.Transport{}}
+}
+
+// newHTTPUploaderWithToken creates an HTTP uploader that sends a Bearer token.
+func newHTTPUploaderWithToken(url, token string) uploader {
+	return &httpUploader{baseURL: url, transport: &http.Transport{}, token: token}
 }
 
 func (u *httpUploader) sendToIngest(body []byte, topic string, state *albionState, identifier string) {
@@ -36,10 +39,21 @@ func (u *httpUploader) sendToIngest(body []byte, topic string, state *albionStat
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	if u.token != "" {
+		req.Header.Set("Authorization", "Bearer "+u.token)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Errorf("Error while sending ingest with data: %v", err)
+		return
+	}
+
+	if resp.StatusCode == 401 {
+		log.Errorf("Got 401 Unauthorized from %v — token expired or invalid", u.baseURL)
+		if OnAuthExpired != nil {
+			OnAuthExpired()
+		}
 		return
 	}
 
