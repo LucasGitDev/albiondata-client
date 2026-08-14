@@ -72,8 +72,12 @@ func (a *App) StartCapture(mode string) error {
 	a.emitCaptureStatus("starting")
 
 	go func() {
-		// Mark running inside the goroutine to avoid a race where Run() errors
-		// before the caller reaches emitCaptureStatus("running").
+		defer func() {
+			if r := recover(); r != nil {
+				alog.Errorf("Capture panic: %v", r)
+				a.emitCaptureStatus("error")
+			}
+		}()
 		a.emitCaptureStatus("running")
 		err := client.NewClient(version).Run()
 		if err != nil {
@@ -81,22 +85,17 @@ func (a *App) StartCapture(mode string) error {
 			a.emitCaptureStatus("error")
 			return
 		}
-		// Run() returns only when the watcher exits normally.
 		a.emitCaptureStatus("stopped")
 	}()
 
 	return nil
 }
 
-// StopCapture signals capture to stop.
-// NOTE: client.Run() launches an albionProcessWatcher whose quit channel is not
-// exposed outside the client package. As a result, StopCapture() cannot cleanly
-// terminate the capture goroutine without modifying client/. For now it logs a
-// warning and marks state stopped in the UI; the goroutine continues running until
-// the app is closed. Adding a proper stop mechanism to client/ is a future task.
+// StopCapture has no effect — client.Run() does not expose a stop channel.
+// The UI hides this button; it exists only so the frontend binding compiles.
+// Restarting the app is the only way to stop capture.
 func (a *App) StopCapture() {
-	alog.Warn("StopCapture: no stop mechanism in client.Run(); goroutine continues until app exit")
-	a.emitCaptureStatus("stopped")
+	alog.Warn("StopCapture: no stop mechanism exposed by client.Run(); restart app to stop")
 }
 
 // CaptureStatus returns the current capture state: "stopped", "starting", "running", or "error".

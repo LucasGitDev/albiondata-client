@@ -68,12 +68,8 @@ export function CaptureTab() {
     logBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs])
 
-  const handleStartStop = async () => {
+  const handleStart = async () => {
     setError(null)
-    if (status === 'running' || status === 'starting') {
-      StopCapture()
-      return
-    }
     try {
       await StartCapture(mode)
     } catch (e) {
@@ -81,13 +77,8 @@ export function CaptureTab() {
     }
   }
 
-  const startStopLabel =
-    status === 'running' ? 'Stop Capture'
-    : status === 'starting' ? 'Starting…'
-    : status === 'error' ? 'Restart Capture'
-    : 'Start Capture'
-
-  const startStopDisabled = status === 'starting'
+  const isCapturing = status === 'running' || status === 'starting'
+  const startLabel = status === 'starting' ? 'Starting…' : status === 'error' ? 'Retry Capture' : 'Start Capture'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, height: '100%' }}>
@@ -97,7 +88,7 @@ export function CaptureTab() {
           <button
             key={m}
             onClick={() => setMode(m)}
-            disabled={status === 'running' || status === 'starting'}
+            disabled={isCapturing}
             style={{
               padding: '6px 18px',
               borderRadius: 6,
@@ -127,25 +118,26 @@ export function CaptureTab() {
           }}
         />
         <span style={{ color: '#d1d5db', textTransform: 'capitalize', minWidth: 72 }}>{status}</span>
-        <button
-          onClick={handleStartStop}
-          disabled={startStopDisabled}
-          style={{
-            padding: '7px 20px',
-            borderRadius: 6,
-            border: 'none',
-            background:
-              status === 'running' ? '#7f1d1d'
-              : status === 'error' ? '#78350f'
-              : '#312e81',
-            color: '#fff',
-            cursor: startStopDisabled ? 'not-allowed' : 'pointer',
-            opacity: startStopDisabled ? 0.5 : 1,
-            fontWeight: 600,
-          }}
-        >
-          {startStopLabel}
-        </button>
+        {!isCapturing && (
+          <button
+            onClick={handleStart}
+            disabled={status === 'starting'}
+            style={{
+              padding: '7px 20px',
+              borderRadius: 6,
+              border: 'none',
+              background: status === 'error' ? '#78350f' : '#312e81',
+              color: '#fff',
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            {startLabel}
+          </button>
+        )}
+        {isCapturing && (
+          <span style={{ color: '#6b7280', fontSize: 12 }}>Restart app to stop capture</span>
+        )}
       </div>
 
       {error && (
