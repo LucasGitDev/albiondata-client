@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/ao-data/albiondata-client/auth"
 	"github.com/ao-data/albiondata-client/client"
 	alog "github.com/ao-data/albiondata-client/log"
+	"github.com/pkg/browser"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -16,6 +18,8 @@ type App struct {
 	captureMu    sync.Mutex
 	captureState string // "stopped" | "starting" | "running" | "error"
 	configOnce   sync.Once
+	sessionMu    sync.Mutex
+	session      *auth.Session
 }
 
 func NewApp() *App {
@@ -25,6 +29,11 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	alog.AddHook(alog.NewWailsHook(ctx, nil))
+	// Restore saved session if present.
+	if s, err := auth.LoadSession(); err == nil && s != nil {
+		a.session = s
+		alog.Infof("Restored session for %s", s.Email)
+	}
 	runtime.LogInfo(ctx, "Albion Data Client started")
 }
 
@@ -113,6 +122,48 @@ func (a *App) emitCaptureStatus(state string) {
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "capture:status", state)
 	}
+}
+
+// IsLoggedIn returns true if a session is loaded (token may need refresh).
+func (a *App) IsLoggedIn() bool {
+	a.sessionMu.Lock()
+	defer a.sessionMu.Unlock()
+	return a.session != nil
+}
+
+// GetUserEmail returns the logged-in user's email, or empty string.
+func (a *App) GetUserEmail() string {
+	a.sessionMu.Lock()
+	defer a.sessionMu.Unlock()
+	if a.session == nil {
+		return ""
+	}
+	return a.session.Email
+}
+
+// Login starts the Google OAuth2 browser flow. Blocks until complete or cancelled.
+func (a *App) Login() error {
+	session, err := auth.Login(a.ctx, browser.OpenURL)
+	if err != nil {
+		return err
+	}
+	a.sessionMu.Lock()
+	a.session = session
+	a.sessionMu.Unlock()
+	runtime.EventsEmit(a.ctx, "auth:login", session.Email)
+	return nil
+}
+
+// Logout clears the session from memory and disk.
+func (a *App) Logout() error {
+	if err := auth.DeleteSession(); err != nil {
+		return err
+	}
+	a.sessionMu.Lock()
+	a.session = nil
+	a.sessionMu.Unlock()
+	runtime.EventsEmit(a.ctx, "auth:logout", nil)
+	return nil
 }
 
 // NotifyUpdateAvailable emits a Wails event when a new version is available.

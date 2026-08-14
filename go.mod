@@ -12,15 +12,18 @@ require (
 	github.com/mattn/go-colorable v0.1.14
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/nats-io/go-nats v1.7.2
+	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/viper v1.21.0
 	github.com/wailsapp/wails/v2 v2.14.0
+	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sys v0.46.0
 	gopkg.in/toast.v1 v1.0.0-20180812000517-0a84660828b2
 )
 
 require (
 	aead.dev/minisign v0.3.0 // indirect
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
@@ -50,7 +53,6 @@ require (
 	github.com/minio/selfupdate v0.6.0 // indirect
 	github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
-	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
