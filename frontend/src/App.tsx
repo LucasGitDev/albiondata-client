@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { CaptureTab } from './CaptureTab'
 import { SettingsTab } from './SettingsTab'
+import { AccountTab } from './AccountTab'
 
-type Tab = 'capture' | 'settings'
+type Tab = 'capture' | 'account' | 'settings'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'capture', label: 'Capture' },
+  { id: 'account', label: 'Account' },
   { id: 'settings', label: 'Settings' },
 ]
 
@@ -57,6 +59,7 @@ function App() {
       </header>
       <main style={{ flex: 1, padding: 24, display: 'flex', flexDirection: 'column' }}>
         {tab === 'capture' && <CaptureTab />}
+        {tab === 'account' && <AccountTab />}
         {tab === 'settings' && <SettingsTab />}
       </main>
     </div>
