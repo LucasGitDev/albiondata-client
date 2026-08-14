@@ -2,9 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -131,13 +128,11 @@ func Login(ctx context.Context, openBrowser func(url string) error) (*Session, e
 		return nil, errors.New("Google OAuth client ID not configured (set GOOGLE_CLIENT_ID or build with -ldflags)")
 	}
 
-	verifier := pkceVerifier()
-	challenge := pkceChallenge(verifier)
+	verifier := oauth2.GenerateVerifier()
 
 	authURL := cfg.AuthCodeURL("state",
 		oauth2.AccessTypeOffline,
-		oauth2.SetAuthURLParam("code_challenge", challenge),
-		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
+		oauth2.S256ChallengeOption(verifier),
 	)
 
 	codeCh := make(chan string, 1)
@@ -179,9 +174,7 @@ func Login(ctx context.Context, openBrowser func(url string) error) (*Session, e
 		return nil, errors.New("login timed out after 5 minutes")
 	}
 
-	tok, err := cfg.Exchange(ctx, code,
-		oauth2.SetAuthURLParam("code_verifier", verifier),
-	)
+	tok, err := cfg.Exchange(ctx, code, oauth2.VerifierOption(verifier))
 	if err != nil {
 		return nil, fmt.Errorf("token exchange: %w", err)
 	}
@@ -252,13 +245,3 @@ func GetValidToken(ctx context.Context, s *Session) (string, error) {
 	return refreshed.AccessToken, nil
 }
 
-func pkceVerifier() string {
-	b := make([]byte, 32)
-	rand.Read(b) //nolint:errcheck
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-func pkceChallenge(verifier string) string {
-	h := sha256.Sum256([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(h[:])
-}
