@@ -37,6 +37,7 @@ export function CaptureTab() {
   const [status, setStatus] = useState<CaptureState>('stopped')
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [captureError, setCaptureError] = useState<string | null>(null)
   const logBottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -46,6 +47,12 @@ export function CaptureTab() {
     // Listen for status changes
     EventsOn('capture:status', (state: string) => {
       setStatus(state as CaptureState)
+      if (state !== 'error') setCaptureError(null)
+    })
+
+    // Listen for actionable capture errors (e.g. BPF permission denied)
+    EventsOn('capture:error', (msg: string) => {
+      setCaptureError(msg)
     })
 
     // Listen for log entries
@@ -59,6 +66,7 @@ export function CaptureTab() {
 
     return () => {
       EventsOff('capture:status')
+      EventsOff('capture:error')
       EventsOff('log:entry')
     }
   }, [])
@@ -143,6 +151,15 @@ export function CaptureTab() {
       {error && (
         <div style={{ color: '#fca5a5', fontSize: 13, background: '#450a0a', padding: '6px 10px', borderRadius: 4 }}>
           {error}
+        </div>
+      )}
+
+      {captureError && (
+        <div style={{ background: '#1c1917', border: '1px solid #78350f', borderRadius: 6, padding: '10px 14px' }}>
+          <div style={{ color: '#fca5a5', fontWeight: 600, marginBottom: 6, fontSize: 13 }}>Capture failed</div>
+          <pre style={{ color: '#d1d5db', fontSize: 12, margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
+            {captureError}
+          </pre>
         </div>
       )}
 
