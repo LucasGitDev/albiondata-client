@@ -37,3 +37,16 @@ func (a *App) StopCapture() {}
 func (a *App) CaptureStatus() string {
 	return "stopped"
 }
+
+// NotifyUpdateAvailable emits a Wails event when a new version is available.
+// Auto-update via syscall.Exec is disabled in the Wails build (that logic lives in
+// albiondata-client.go which is gated //go:build cli). Updates are user-manual:
+// the user downloads and installs the new binary themselves.
+// This stub exists so the UI (TASK-8) can wire an "update available" banner without
+// requiring another backend change when update checking is added later.
+func (a *App) NotifyUpdateAvailable(version string) {
+	if a.ctx == nil {
+		return
+	}
+	runtime.EventsEmit(a.ctx, "update:available", version)
+}
