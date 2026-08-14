@@ -72,6 +72,9 @@ func (a *App) StartCapture(mode string) error {
 	a.emitCaptureStatus("starting")
 
 	go func() {
+		// Mark running inside the goroutine to avoid a race where Run() errors
+		// before the caller reaches emitCaptureStatus("running").
+		a.emitCaptureStatus("running")
 		err := client.NewClient(version).Run()
 		if err != nil {
 			alog.Errorf("Capture error: %v", err)
@@ -82,7 +85,6 @@ func (a *App) StartCapture(mode string) error {
 		a.emitCaptureStatus("stopped")
 	}()
 
-	a.emitCaptureStatus("running")
 	return nil
 }
 
