@@ -18,3 +18,7 @@ build-linux:
 
 build-darwin:
 	scripts/build-darwin.sh
+
+generate:
+	wails generate module
+	@echo "Bindings regenerated. Commit frontend/wailsjs/ if app.go changed."
