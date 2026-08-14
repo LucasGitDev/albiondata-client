@@ -69,12 +69,34 @@ func (a *App) StartCapture(mode string) error {
 	switch mode {
 	case "public":
 		// PublicIngestBaseUrls default set by SetupFlags: "https+pow://albion-online-data.com"
-		// Don't override — use whatever SetupFlags defaulted or the user configured.
+		client.PrivateAuthToken = ""
+		client.OnAuthExpired = nil
 	case "private":
-		// TASK-9 will inject the real auth token and endpoint here.
-		// For MVP: use placeholder URL; upload will fail gracefully (no token).
 		if client.ConfigGlobal.PrivateIngestBaseUrls == "" {
 			client.ConfigGlobal.PrivateIngestBaseUrls = "https://albion-online-data.com"
+		}
+		a.sessionMu.Lock()
+		sess := a.session
+		a.sessionMu.Unlock()
+		if sess == nil {
+			return fmt.Errorf("not logged in: login required for private capture")
+		}
+		token, err := auth.GetValidToken(a.ctx, sess)
+		if err != nil {
+			return fmt.Errorf("token refresh failed: %w", err)
+		}
+		client.PrivateAuthToken = token
+		client.OnAuthExpired = func() {
+			alog.Warn("Private ingest returned 401 — clearing session, re-login required")
+			a.sessionMu.Lock()
+			a.session = nil
+			a.sessionMu.Unlock()
+			if err := auth.DeleteSession(); err != nil {
+				alog.Errorf("Failed to delete session after 401: %v", err)
+			}
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "auth:expired", nil)
+			}
 		}
 	}
 

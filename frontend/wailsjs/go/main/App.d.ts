@@ -3,6 +3,14 @@
 
 export function CaptureStatus():Promise<string>;
 
+export function GetUserEmail():Promise<string>;
+
+export function IsLoggedIn():Promise<boolean>;
+
+export function Login():Promise<void>;
+
+export function Logout():Promise<void>;
+
 export function NotifyUpdateAvailable(arg1:string):Promise<void>;
 
 export function StartCapture(arg1:string):Promise<void>;

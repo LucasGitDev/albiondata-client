@@ -28,6 +28,14 @@ func createDispatcher() {
 }
 
 func createUploaders(targets []string) []uploader {
+	return createUploadersWithToken(targets, "")
+}
+
+func createPrivateUploaders(targets []string) []uploader {
+	return createUploadersWithToken(targets, PrivateAuthToken)
+}
+
+func createUploadersWithToken(targets []string, token string) []uploader {
 	var uploaders []uploader
 	for _, target := range targets {
 		if target == "" {
@@ -38,10 +46,14 @@ func createUploaders(targets []string) []uploader {
 			continue
 		}
 
-		if target[0:8] == "http+pow" ||  target[0:9] == "https+pow" {
+		if target[0:8] == "http+pow" || target[0:9] == "https+pow" {
 			uploaders = append(uploaders, newHTTPUploaderPow(target))
 		} else if target[0:4] == "http" || target[0:5] == "https" {
-			uploaders = append(uploaders, newHTTPUploader(target))
+			if token != "" {
+				uploaders = append(uploaders, newHTTPUploaderWithToken(target, token))
+			} else {
+				uploaders = append(uploaders, newHTTPUploader(target))
+			}
 		} else if target[0:4] == "nats" {
 			uploaders = append(uploaders, newNATSUploader(target))
 		} else {
@@ -67,7 +79,7 @@ func sendMsgToPublicUploaders(upload interface{}, topic string, state *albionSta
 	}
 
 	var publicUploaders = createUploaders(strings.Split(PublicIngestBaseUrls, ","))
-	var privateUploaders = createUploaders(strings.Split(ConfigGlobal.PrivateIngestBaseUrls, ","))
+	var privateUploaders = createPrivateUploaders(strings.Split(ConfigGlobal.PrivateIngestBaseUrls, ","))
 
 	sendMsgToUploaders(data, topic, publicUploaders, state, identifier)
 	sendMsgToUploaders(data, topic, privateUploaders, state, identifier)
@@ -100,7 +112,7 @@ func sendMsgToPrivateUploaders(upload lib.PersonalizedUpload, topic string, stat
 		return
 	}
 
-	var privateUploaders = createUploaders(strings.Split(ConfigGlobal.PrivateIngestBaseUrls, ","))
+	var privateUploaders = createPrivateUploaders(strings.Split(ConfigGlobal.PrivateIngestBaseUrls, ","))
 	if len(privateUploaders) > 0 {
 		sendMsgToUploaders(data, topic, privateUploaders, state, identifier)
 	}
