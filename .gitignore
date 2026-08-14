@@ -22,3 +22,5 @@ run.sh
 
 
 .backlog/
+# Wails build output
+build/bin/
