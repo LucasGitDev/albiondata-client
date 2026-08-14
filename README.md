@@ -49,6 +49,38 @@ As of 2023-01-01, [Stanx](https://github.com/phendryx) is the primary maintainer
 Downloads can be found here: https://github.com/ao-data/albiondata-client/releases
 
 Stats for the client releases can be viewed [here](https://tooomm.github.io/github-release-stats/?username=ao-data&repository=albiondata-client).
+## Packet Capture Permissions
+
+The client reads raw network packets and requires elevated capture permissions on all platforms.
+
+### macOS
+
+BPF devices (`/dev/bpf*`) must be readable. Without this, capture fails with "permission denied".
+
+**Option A — ChmodBPF (recommended, persistent):** Install [Wireshark](https://www.wireshark.org/download.html) or the standalone [ChmodBPF package](https://www.wireshark.org/download.html). It installs a startup item that sets BPF permissions automatically on boot.
+
+**Option B — one-time fix (resets on reboot):**
+```bash
+sudo chmod 644 /dev/bpf*
+```
+
+### Linux
+
+Grant the binary capability to open raw sockets without running as root:
+```bash
+sudo setcap cap_net_raw,cap_net_admin=eip /path/to/albiondata-client
+```
+
+Or run as root: `sudo ./albiondata-client`
+
+libpcap must be installed: `sudo apt install libpcap-dev` (Debian/Ubuntu) or equivalent.
+
+### Windows
+
+Install [Npcap](https://npcap.com) (choose "WinPcap API-compatible mode" during setup). Npcap is required for packet capture. WinPcap also works but is no longer maintained.
+
+---
+
 ## Running on Mac
 
 ### Running from the Finder

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/ao-data/albiondata-client/auth"
@@ -105,7 +106,9 @@ func (a *App) StartCapture(mode string) error {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				alog.Errorf("Capture panic: %v", r)
+				msg := fmt.Sprintf("%v", r)
+				alog.Errorf("Capture panic: %v", msg)
+				a.emitCaptureError(msg)
 				a.emitCaptureStatus("error")
 			}
 		}()
@@ -113,6 +116,7 @@ func (a *App) StartCapture(mode string) error {
 		err := client.NewClient(version).Run()
 		if err != nil {
 			alog.Errorf("Capture error: %v", err)
+			a.emitCaptureError(err.Error())
 			a.emitCaptureStatus("error")
 			return
 		}
@@ -144,6 +148,24 @@ func (a *App) emitCaptureStatus(state string) {
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "capture:status", state)
 	}
+}
+
+// emitCaptureError emits a "capture:error" event with an actionable message.
+// If the error looks like a BPF/pcap permission denial, it substitutes platform guidance.
+func (a *App) emitCaptureError(raw string) {
+	if a.ctx == nil {
+		return
+	}
+	msg := raw
+	lower := strings.ToLower(raw)
+	if (strings.Contains(lower, "bpf") || strings.Contains(lower, "pcap") || strings.Contains(lower, "npcap")) &&
+		strings.Contains(lower, "permission") {
+		msg = "Packet capture permission denied.\n" +
+			"macOS: install ChmodBPF (via Wireshark) or run: sudo chmod 644 /dev/bpf*\n" +
+			"Linux: sudo setcap cap_net_raw,cap_net_admin=eip <binary>, or run as root\n" +
+			"Windows: install Npcap (https://npcap.com)"
+	}
+	runtime.EventsEmit(a.ctx, "capture:error", msg)
 }
 
 // IsLoggedIn returns true if a session is loaded (token may need refresh).
