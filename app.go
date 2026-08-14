@@ -166,6 +166,34 @@ func (a *App) Logout() error {
 	return nil
 }
 
+// SettingsPayload holds user-configurable ingest URL overrides.
+type SettingsPayload struct {
+	PublicIngestBaseUrls  string `json:"publicIngestBaseUrls"`
+	PrivateIngestBaseUrls string `json:"privateIngestBaseUrls"`
+}
+
+// GetSettings returns current ingest URL configuration.
+func (a *App) GetSettings() SettingsPayload {
+	a.initConfig()
+	return SettingsPayload{
+		PublicIngestBaseUrls:  client.ConfigGlobal.PublicIngestBaseUrls,
+		PrivateIngestBaseUrls: client.ConfigGlobal.PrivateIngestBaseUrls,
+	}
+}
+
+// SaveSettings applies ingest URL overrides in-memory.
+// Persistence to config.yaml is not implemented yet — settings reset on app restart.
+func (a *App) SaveSettings(s SettingsPayload) error {
+	a.initConfig()
+	if s.PublicIngestBaseUrls != "" {
+		client.ConfigGlobal.PublicIngestBaseUrls = s.PublicIngestBaseUrls
+	}
+	if s.PrivateIngestBaseUrls != "" {
+		client.ConfigGlobal.PrivateIngestBaseUrls = s.PrivateIngestBaseUrls
+	}
+	return nil
+}
+
 // NotifyUpdateAvailable emits a Wails event when a new version is available.
 // Auto-update via syscall.Exec is disabled in the Wails build (that logic lives in
 // albiondata-client.go which is gated //go:build cli). Updates are user-manual.

@@ -6,8 +6,32 @@ export function CaptureStatus() {
   return window['go']['main']['App']['CaptureStatus']();
 }
 
+export function GetSettings() {
+  return window['go']['main']['App']['GetSettings']();
+}
+
+export function GetUserEmail() {
+  return window['go']['main']['App']['GetUserEmail']();
+}
+
+export function IsLoggedIn() {
+  return window['go']['main']['App']['IsLoggedIn']();
+}
+
+export function Login() {
+  return window['go']['main']['App']['Login']();
+}
+
+export function Logout() {
+  return window['go']['main']['App']['Logout']();
+}
+
 export function NotifyUpdateAvailable(arg1) {
   return window['go']['main']['App']['NotifyUpdateAvailable'](arg1);
+}
+
+export function SaveSettings(arg1) {
+  return window['go']['main']['App']['SaveSettings'](arg1);
 }
 
 export function StartCapture(arg1) {
