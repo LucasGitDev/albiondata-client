@@ -121,7 +121,7 @@ export function CaptureTab() {
         {!isCapturing && (
           <button
             onClick={handleStart}
-            disabled={status === 'starting'}
+            disabled={false}
             style={{
               padding: '7px 20px',
               borderRadius: 6,
