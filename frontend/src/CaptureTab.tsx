@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
-import { CaptureStatus, StartCapture, StopCapture } from '../wailsjs/go/main/App'
+import { CaptureStatus, StartCapture } from '../wailsjs/go/main/App'
 
 type CaptureState = 'stopped' | 'starting' | 'running' | 'error'
 
