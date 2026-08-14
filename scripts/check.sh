@@ -7,6 +7,31 @@ set -eo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+FRONTEND="$ROOT/frontend"
+if [ -d "$FRONTEND" ]; then
+  cd "$FRONTEND"
+
+  echo "=== Frontend: install ==="
+  npm ci --silent
+
+  # Build dist/ before Go steps — go:embed all:frontend/dist requires it.
+  if [ ! -d "$FRONTEND/dist" ]; then
+    echo "=== Frontend: bootstrap dist/ ==="
+    npm run build --silent
+  fi
+
+  echo "=== Frontend: lint ==="
+  npm run lint --if-present
+
+  echo "=== Frontend: typecheck ==="
+  npx tsc --noEmit
+
+  echo "=== Frontend: build ==="
+  npm run build
+
+  cd "$ROOT"
+fi
+
 echo "=== Go: build ==="
 go build $(go list ./... | grep -v '/frontend/')
 
@@ -21,32 +46,6 @@ if command -v golangci-lint &>/dev/null; then
   golangci-lint run
 else
   echo "=== Go: lint (skipped — golangci-lint not installed) ==="
-fi
-
-FRONTEND="$ROOT/frontend"
-if [ -d "$FRONTEND" ]; then
-  cd "$FRONTEND"
-
-  echo "=== Frontend: install ==="
-  npm ci --silent
-
-  # Bootstrap: build dist/ if missing so the Go embed directive doesn't fail
-  # on fresh worktrees that haven't run the frontend build yet.
-  if [ ! -d "$FRONTEND/dist" ]; then
-    echo "=== Frontend: bootstrap dist/ (first run) ==="
-    npm run build --silent
-  fi
-
-  echo "=== Frontend: lint ==="
-  npm run lint --if-present
-
-  echo "=== Frontend: typecheck ==="
-  npx tsc --noEmit
-
-  echo "=== Frontend: build ==="
-  npm run build
-
-  cd "$ROOT"
 fi
 
 echo "=== Wails: native build (smoke test) ==="
