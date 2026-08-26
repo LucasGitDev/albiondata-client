@@ -9,6 +9,13 @@ import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import collector.Mobile
+import com.albiondata.client.auth.AuthManager
+import com.albiondata.client.auth.TokenExpiredException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
@@ -28,7 +35,6 @@ class PacketCaptureVpnService : VpnService() {
         // Broadcast actions emitted by the service to update the UI.
         const val ACTION_PACKET_COUNT = "com.albiondata.client.PACKET_COUNT"
         const val ACTION_UPLOAD_STATUS = "com.albiondata.client.UPLOAD_STATUS"
-        const val ACTION_AUTH_EXPIRED = "com.albiondata.client.AUTH_EXPIRED"
 
         const val EXTRA_PACKET_COUNT = "packet_count"
         const val EXTRA_UPLOAD_STATUS = "upload_status"
@@ -37,12 +43,19 @@ class PacketCaptureVpnService : VpnService() {
         const val EXTRA_AUTH_TOKEN = "com.albiondata.client.AUTH_TOKEN"
 
         private const val DEFAULT_INGEST_URL = "https://www.albion-online-data.com/api/v2"
+        private const val TOKEN_REFRESH_INTERVAL_MS = 60_000L
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private val running = AtomicBoolean(false)
     private var captureThread: Thread? = null
     private var collector: Mobile.MobileCollector? = null
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val authManager by lazy { AuthManager(applicationContext) }
+
+    @Volatile
+    private var currentAccessToken: String? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -53,12 +66,62 @@ class PacketCaptureVpnService : VpnService() {
             }
             else -> {
                 val ingestURL = intent?.getStringExtra(EXTRA_INGEST_URL) ?: DEFAULT_INGEST_URL
-                val authToken = intent?.getStringExtra(EXTRA_AUTH_TOKEN) ?: ""
+                val intentToken = intent?.getStringExtra(EXTRA_AUTH_TOKEN) ?: ""
                 startForegroundWithNotification()
-                startCapture(ingestURL, authToken)
+                initAuthThenStartCapture(ingestURL, intentToken)
             }
         }
         return START_STICKY
+    }
+
+    private fun initAuthThenStartCapture(ingestURL: String, intentToken: String) {
+        serviceScope.launch {
+            val clientId = BuildConfig.GOOGLE_CLIENT_ID
+            if (clientId.isNotBlank() && authManager.tokenStore.ingestMode == "private") {
+                try {
+                    currentAccessToken = authManager.refreshTokenIfNeeded(clientId)
+                    Log.i(TAG, "Auth token loaded for private mode")
+                } catch (e: TokenExpiredException) {
+                    Log.e(TAG, "Refresh token expired — broadcasting AUTH_EXPIRED", e)
+                    broadcastAuthExpired()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Token refresh failed on start; will retry during capture", e)
+                }
+            } else if (intentToken.isNotEmpty()) {
+                currentAccessToken = intentToken
+            }
+            startCapture(ingestURL, currentAccessToken ?: "")
+            scheduleTokenRefresh(clientId)
+        }
+    }
+
+    private fun scheduleTokenRefresh(clientId: String) {
+        if (clientId.isBlank()) return
+        serviceScope.launch {
+            while (running.get()) {
+                kotlinx.coroutines.delay(TOKEN_REFRESH_INTERVAL_MS)
+                if (!running.get()) break
+                try {
+                    val newToken = authManager.refreshTokenIfNeeded(clientId)
+                    if (newToken != null && newToken != currentAccessToken) {
+                        currentAccessToken = newToken
+                        collector?.setAuthToken(newToken)
+                        Log.i(TAG, "Access token refreshed in background")
+                    }
+                } catch (e: TokenExpiredException) {
+                    Log.e(TAG, "Refresh token revoked — stopping authenticated uploads", e)
+                    currentAccessToken = null
+                    authManager.tokenStore.accessToken = null
+                    broadcastAuthExpired()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Background token refresh failed; will retry next cycle", e)
+                }
+            }
+        }
+    }
+
+    private fun broadcastAuthExpired() {
+        sendBroadcast(Intent(AuthManager.ACTION_AUTH_EXPIRED))
     }
 
     private fun startForegroundWithNotification() {
@@ -102,7 +165,6 @@ class PacketCaptureVpnService : VpnService() {
     private fun startCapture(ingestURL: String, authToken: String) {
         if (running.getAndSet(true)) return
 
-        // Initialise the Go data pipeline.
         val c = Mobile.NewMobileCollector().also {
             it.setIngestURL(ingestURL)
             if (authToken.isNotEmpty()) it.setAuthToken(authToken)
@@ -164,11 +226,8 @@ class PacketCaptureVpnService : VpnService() {
                 packetCount++
                 Log.d(TAG, "Packet #$packetCount: $length bytes")
 
-                // Forward the raw IPv4 packet to the Go data pipeline for
-                // Photon parsing and HTTP upload.
                 collector?.feedPacket(buffer.array().copyOf(length))
 
-                // Broadcast count every 100 packets to reduce IPC overhead.
                 if (packetCount - lastBroadcast >= 100) {
                     lastBroadcast = packetCount
                     sendLocalBroadcast(ACTION_PACKET_COUNT) {
@@ -206,6 +265,7 @@ class PacketCaptureVpnService : VpnService() {
 
     override fun onDestroy() {
         stopCapture()
+        serviceScope.cancel()
         super.onDestroy()
     }
 }
