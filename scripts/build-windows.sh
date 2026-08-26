@@ -33,7 +33,8 @@ cd pkg/nsis
 make nsis
 
 # NSIS outputs installer to apps/desktop/ (../../ from pkg/nsis)
-cd ../../..
+# Return to repo root: pkg/nsis -> pkg -> apps/desktop -> apps -> repo root
+cd ../../../..
 
 # Copy artifacts to repo root
 cp apps/desktop/albiondata-client.exe albiondata-client.exe
