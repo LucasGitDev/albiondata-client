@@ -18,8 +18,10 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
-    - name: Install golangci-lint
-      run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v7
+      with:
+        version: v2.13.1
     - name: Run quality gate
       run: make check
 
