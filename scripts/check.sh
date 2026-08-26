@@ -44,8 +44,17 @@ go test ./apps/desktop/... ./libs/collector/...
 
 if command -v golangci-lint &>/dev/null; then
   echo "=== Go: lint ==="
-  (cd "$DESKTOP" && golangci-lint run)
-  (cd "$ROOT/libs/collector" && golangci-lint run)
+  # golangci-lint fails immediately (exit 3) when built with an older Go than the
+  # module requires. Probe with --issues-exit-code=0 so we can distinguish a
+  # version mismatch (skip gracefully) from real lint failures (hard error).
+  _probe_out=$(cd "$DESKTOP" && golangci-lint run --issues-exit-code=0 2>&1 || true)
+  if echo "$_probe_out" | grep -q "Go language version"; then
+    echo "    golangci-lint skipped — binary built with older Go than project requires"
+    echo "    Install golangci-lint built with Go $(go version | awk '{print $3}') to enable lint."
+  else
+    (cd "$DESKTOP" && golangci-lint run)
+    (cd "$ROOT/libs/collector" && golangci-lint run)
+  fi
 else
   echo "=== Go: lint (skipped — golangci-lint not installed) ==="
 fi
