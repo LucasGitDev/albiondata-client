@@ -1,4 +1,4 @@
-.PHONY: check run fmt validate-fmt build-windows build-linux build-darwin generate doctor setup setup-android gomobile-android
+.PHONY: check run fmt validate-fmt build-windows build-linux build-darwin generate doctor setup setup-android gomobile-android clean
 
 # ── Quality gate ─────────────────────────────────────────────────────────────
 
@@ -62,6 +62,18 @@ dev-setup:
 ## Requires: gomobile, ANDROID_HOME or ANDROID_SDK_ROOT (run `make setup-android` first)
 gomobile-android:
 	scripts/gomobile-android.sh
+
+# ── Clean ────────────────────────────────────────────────────────────────────
+
+## clean: remove build outputs (build/bin/); print active worktrees for manual review
+clean:
+	@echo "Removing build outputs..."
+	rm -rf build/bin/
+	@echo ""
+	@echo "Active worktrees (review manually before removing):"
+	@git worktree list
+	@echo ""
+	@echo "To remove a worktree: git worktree remove <path>"
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 
