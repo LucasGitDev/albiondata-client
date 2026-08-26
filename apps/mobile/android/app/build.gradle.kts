@@ -40,6 +40,11 @@ android {
 }
 
 dependencies {
+    // Go collector AAR — built via `make gomobile-android`.
+    // The file is committed at apps/mobile/android/app/libs/collector.aar once built.
+    // If missing locally, run: ANDROID_HOME=<sdk-path> make gomobile-android
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
