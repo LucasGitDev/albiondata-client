@@ -9,6 +9,7 @@ import (
 	"github.com/ao-data/albiondata-client/auth"
 	"github.com/ao-data/albiondata-client/client"
 	alog "github.com/ao-data/albiondata-client/log"
+	"github.com/ao-data/albiondata-collector"
 	"github.com/pkg/browser"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -21,6 +22,8 @@ type App struct {
 	configOnce   sync.Once
 	sessionMu    sync.Mutex
 	session      *auth.Session
+	// col is the standalone collector library instance used for capture lifecycle.
+	col *collector.Collector
 }
 
 func NewApp() *App {
@@ -30,6 +33,8 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	alog.AddHook(alog.NewWailsHook(ctx, nil))
+	// Initialise the standalone collector library backed by the desktop capture implementation.
+	a.col = newCollector(version)
 	// Restore saved session if present.
 	if s, err := auth.LoadSession(); err == nil && s != nil {
 		a.session = s
@@ -101,8 +106,19 @@ func (a *App) StartCapture(mode string) error {
 		}
 	}
 
+	// Propagate current config to the standalone collector library.
+	a.col.SetIngestURL(client.ConfigGlobal.PublicIngestBaseUrls)
+	a.col.SetPrivateIngestURL(client.ConfigGlobal.PrivateIngestBaseUrls)
+	a.col.SetAuthToken(client.PrivateAuthToken)
+
 	a.emitCaptureStatus("starting")
 
+	errCh, startErr := a.col.Start()
+	if startErr != nil {
+		// Should not happen since we checked state above, but handle defensively.
+		a.emitCaptureStatus("stopped")
+		return startErr
+	}
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -113,8 +129,7 @@ func (a *App) StartCapture(mode string) error {
 			}
 		}()
 		a.emitCaptureStatus("running")
-		err := client.NewClient(version).Run()
-		if err != nil {
+		if err := <-errCh; err != nil {
 			alog.Errorf("Capture error: %v", err)
 			a.emitCaptureError(err.Error())
 			a.emitCaptureStatus("error")
@@ -126,10 +141,12 @@ func (a *App) StartCapture(mode string) error {
 	return nil
 }
 
-// StopCapture has no effect — client.Run() does not expose a stop channel.
-// The UI hides this button; it exists only so the frontend binding compiles.
-// Restarting the app is the only way to stop capture.
+// StopCapture delegates to the collector library's Stop method.
+// The current desktop RunFunc (client.Run) does not expose a stop channel, so this
+// is effectively a no-op on desktop. It exists so the frontend binding compiles and
+// so mobile implementations (which can stop via context cancellation) work correctly.
 func (a *App) StopCapture() {
+	a.col.Stop()
 	alog.Warn("StopCapture: no stop mechanism exposed by client.Run(); restart app to stop")
 }
 

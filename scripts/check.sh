@@ -41,6 +41,15 @@ go vet $(go list ./... | grep -v '/frontend/')
 echo "=== Go: test ==="
 go test $(go list ./... | grep -v '/frontend/')
 
+# Test each go.work sub-module that is not the root module.
+if [ -f "$ROOT/go.work" ]; then
+  while IFS= read -r moddir; do
+    [ "$moddir" = "." ] && continue
+    echo "=== Go: test sub-module $moddir ==="
+    (cd "$ROOT/$moddir" && go test ./...)
+  done < <(go work edit -json | grep '"DiskPath"' | awk -F'"' '{print $4}')
+fi
+
 if command -v golangci-lint &>/dev/null; then
   echo "=== Go: lint ==="
   golangci-lint run
