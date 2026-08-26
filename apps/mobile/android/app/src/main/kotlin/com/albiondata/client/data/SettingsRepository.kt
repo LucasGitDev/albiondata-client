@@ -26,10 +26,11 @@ class SettingsRepository(private val context: Context) {
 
     companion object {
         private val KEY_PRIVATE_MODE = booleanPreferencesKey("private_mode")
-        private val KEY_INGEST_URL = stringPreferencesKey("ingest_url")
-        private val KEY_USER_EMAIL = stringPreferencesKey("user_email")
+        private val KEY_INGEST_URL   = stringPreferencesKey("ingest_url")
+        private val KEY_REALM        = stringPreferencesKey("realm")
+        private val KEY_USER_EMAIL   = stringPreferencesKey("user_email")
 
-        private const val PREF_FILE = "secure_prefs"
+        private const val PREF_FILE       = "secure_prefs"
         private const val PREF_AUTH_TOKEN = "auth_token"
     }
 
@@ -48,12 +49,17 @@ class SettingsRepository(private val context: Context) {
 
     val settingsFlow: Flow<AppSettings> = context.dataStore.data.map { prefs ->
         val privateMode = prefs[KEY_PRIVATE_MODE] ?: false
-        val ingestUrl = prefs[KEY_INGEST_URL]
-            ?: if (privateMode) DEFAULT_PRIVATE_URL else DEFAULT_AODP_URL
+        val realm = realmFromKey(prefs[KEY_REALM] ?: Realm.WEST.name)
+        val ingestUrl = if (privateMode) {
+            prefs[KEY_INGEST_URL] ?: DEFAULT_PRIVATE_URL
+        } else {
+            realm.powUrl
+        }
         val userEmail = prefs[KEY_USER_EMAIL]
         val authToken = readAuthToken()
         AppSettings(
             privateMode = privateMode,
+            realm = realm,
             ingestUrl = ingestUrl,
             authToken = authToken,
             userEmail = userEmail,
@@ -62,22 +68,18 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setPrivateMode(enabled: Boolean) {
         context.dataStore.edit { prefs ->
-            val wasPrivate = prefs[KEY_PRIVATE_MODE] ?: false
             prefs[KEY_PRIVATE_MODE] = enabled
-            // Reset URL to matching default when toggling mode, unless user customised it.
-            val current = prefs[KEY_INGEST_URL]
-            val wasDefault = current == null ||
-                current == DEFAULT_AODP_URL ||
-                current == DEFAULT_PRIVATE_URL
-            if (wasDefault) {
-                prefs[KEY_INGEST_URL] = if (enabled) DEFAULT_PRIVATE_URL else DEFAULT_AODP_URL
-            }
             if (!enabled) {
-                // Leaving private mode: clear credentials.
+                // Leaving private mode: clear credentials and reset URL to realm default.
                 prefs.remove(KEY_USER_EMAIL)
+                prefs.remove(KEY_INGEST_URL)
             }
         }
         if (!enabled) clearAuthToken()
+    }
+
+    suspend fun setRealm(realm: Realm) {
+        context.dataStore.edit { prefs -> prefs[KEY_REALM] = realm.name }
     }
 
     suspend fun setIngestUrl(url: String) {

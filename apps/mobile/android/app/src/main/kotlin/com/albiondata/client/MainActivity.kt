@@ -123,6 +123,7 @@ class MainActivity : ComponentActivity() {
                             onPrivateModeToggle = { enabled ->
                                 viewModel.setPrivateMode(enabled)
                             },
+                            onRealmSelect = { realm -> viewModel.setRealm(realm) },
                             onIngestUrlSave = { url -> viewModel.setIngestUrl(url) },
                             onLoginClick = { startOAuthFlow() },
                             onLogoutClick = {

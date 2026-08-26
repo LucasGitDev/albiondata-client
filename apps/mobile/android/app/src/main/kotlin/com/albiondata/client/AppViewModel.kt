@@ -12,6 +12,7 @@ import com.albiondata.client.auth.AuthManager
 import com.albiondata.client.data.AppSettings
 import com.albiondata.client.data.LogEvent
 import com.albiondata.client.data.LogEventType
+import com.albiondata.client.data.Realm
 import com.albiondata.client.data.SettingsRepository
 import java.util.ArrayDeque
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -119,6 +120,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setPrivateMode(enabled: Boolean) {
         viewModelScope.launch { repo.setPrivateMode(enabled) }
+    }
+
+    fun setRealm(realm: Realm) {
+        viewModelScope.launch { repo.setRealm(realm) }
     }
 
     fun setIngestUrl(url: String) {
