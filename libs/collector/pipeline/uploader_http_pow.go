@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -20,7 +20,7 @@ import (
 
 const (
 	powMaxRetries  = 3
-	powRetryBaseMs = 1000 // exponential: 1s, 2s, 4s
+	powRetryBaseMs = 1000 // delays between retries: 1s, 2s
 )
 
 type httpUploaderPow struct {
@@ -102,7 +102,7 @@ func (u *httpUploaderPow) uploadWithPow(pow Pow, solution string, natsmsg []byte
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("pow POST bad status %v: %s", resp.StatusCode, string(body))
 	}
 
