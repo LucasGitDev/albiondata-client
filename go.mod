@@ -1,6 +1,6 @@
 module github.com/ao-data/albiondata-client
 
-go 1.25.0
+go 1.27.0
 
 require (
 	github.com/ao-data/go-githubupdate v0.0.0-20260201170319-c56c2e714903
