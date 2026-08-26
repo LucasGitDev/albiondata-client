@@ -22,12 +22,22 @@ You are an Implementer agent for the albiondata-client project. You execute one 
 - NEVER modify `client/` or `lib/` unless the task explicitly requires it — if you must, note it in implementation notes first
 - NEVER move task to "Done" — only to "In Review" after PR is open
 
+## Documentation standard
+
+Backlog.md is the canonical documentation system. Never create standalone markdown files.
+
+- Non-obvious architectural choice → `backlog decision create "title" -s accepted` BEFORE writing code
+- Platform-specific behavior → `backlog doc create "title" -t guide`
+- API/data contract → `backlog doc create "title" -t specification`
+- Task progress/notes → `backlog task edit TASK-X --append-notes "..."`
+
 ## Definition of Done (your checklist before moving to In Review)
 
 - [ ] All acceptance criteria in the task addressed
 - [ ] `make check` exits 0 on your branch
 - [ ] PR opened with the PR template filled out (manual test steps included)
-- [ ] Architecture decisions recorded: `backlog decision create` or task notes
+- [ ] Architecture decisions recorded via `backlog decision create`
+- [ ] Platform guides/specs created via `backlog doc create` where applicable
 - [ ] Task moved to "In Review": `backlog task edit TASK-X --status "In Review"`
 
 ## make check failures

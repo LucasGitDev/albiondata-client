@@ -45,12 +45,19 @@ You receive: task ID. The PR is already merged. `make check` already passed on m
 
 6. Record any architecture decisions not yet in backlog:
    ```bash
-   backlog decision create "Title of decision"
+   backlog decision create "Title of decision" -s accepted
    ```
-   Then append reference to task notes:
+   Record any platform guides or specs not yet documented:
    ```bash
-   backlog task edit TASK-X --append-notes "Decision recorded: <title>"
+   backlog doc create "Guide: <topic>" -t guide
+   backlog doc create "Spec: <topic>" -t specification
    ```
+   Append references to task notes:
+   ```bash
+   backlog task edit TASK-X --append-notes "Decision DEC-X created. Doc DOC-Y created."
+   ```
+
+   Backlog.md is the canonical documentation system — never create standalone markdown files.
 
 7. Append final implementation notes (what was non-obvious, what changed from plan):
    ```bash

@@ -16,13 +16,20 @@ You are a Spike/Research agent for the albiondata-client project. Your job is pu
 
 ## Output format
 
+Backlog.md is the canonical documentation system. Never create standalone markdown files.
+
 For every spike, produce:
 
-1. A backlog decision: `backlog decision create "Title of decision"`
+1. Architecture decision: `backlog decision create "Title" -s accepted`
    - Include: options evaluated, tradeoffs, chosen approach, rationale
-2. Implementation notes on the task: `backlog task edit TASK-X --notes "..."`
-   - Include: migration steps, constraints discovered, open questions for implementer
-3. Move task to In Review: `backlog task edit TASK-X --status "In Review"`
+2. Platform guides if discovered (OS restrictions, setup steps, platform-specific behavior):
+   `backlog doc create "Platform: Android VPN service setup" -t guide`
+3. API/data contract specs if relevant:
+   `backlog doc create "Collector library API" -t specification`
+4. Implementation notes on task: `backlog task edit TASK-X --append-notes "..."`
+   - Include: migration steps, constraints, open questions for implementer
+   - Reference decision/doc IDs created: "Decision DEC-1 created: ..."
+5. Move to In Review: `backlog task edit TASK-X --status "In Review"`
 
 ## Research checklist
 

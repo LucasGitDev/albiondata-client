@@ -17,6 +17,11 @@ export const meta = {
 const SCAN_SCHEMA = {
   type: 'object',
   properties: {
+    undocumented_decisions: {
+      type: 'array',
+      description: 'Tasks marked Done that mention non-obvious choices but have no linked backlog decision',
+      items: { type: 'string' },
+    },
     eligible_spikes: {
       type: 'array',
       items: {
@@ -55,7 +60,7 @@ const SCAN_SCHEMA = {
       },
     },
   },
-  required: ['eligible_spikes', 'eligible_tasks', 'blocked_tasks'],
+  required: ['eligible_spikes', 'eligible_tasks', 'blocked_tasks', 'undocumented_decisions'],
 }
 
 const OVERLAP_SCHEMA = {
@@ -143,16 +148,22 @@ Run these commands and analyze the output:
 1. \`backlog task list --plain\` — get all tasks and statuses
 2. For each "To Do" task: \`backlog task view TASK-X --plain\` to read description and dependencies
 3. For each "In Progress" task: check if it has an open PR via \`gh pr list --search "head:task/" --json number,headRefName,state\`
+4. Run \`backlog decision list --plain\` to see existing decisions
+5. Run \`backlog doc list --plain\` to see existing docs
 
 Determine:
 - eligible_spikes: To Do tasks with type:spike where parent spike dependencies are Done
 - eligible_tasks: To Do non-spike tasks where all spike/parent dependencies are Done
 - blocked_tasks: To Do tasks still waiting on an incomplete dependency
+- undocumented_decisions: task IDs where implementation notes mention a non-obvious choice
+  but no corresponding backlog decision exists (cross-reference decision list)
 
 A task is blocked if its parent epic has an incomplete spike subtask that it depends on.
 Check task descriptions for explicit "depends on TASK-X" language.
 
 Security audit needed for tasks mentioning: VPN, permissions, auth, token, network, storage, capture.
+
+Backlog.md is the canonical documentation system — flag any gaps in decisions or docs.
 
 Return structured JSON.`,
   { label: 'scan:backlog', phase: 'Scan', schema: SCAN_SCHEMA, agentType: 'orchestrator' }
@@ -164,6 +175,9 @@ if (!scan) {
 }
 
 log(`Scan complete: ${scan.eligible_spikes.length} spikes, ${scan.eligible_tasks.length} tasks, ${scan.blocked_tasks.length} blocked`)
+if (scan.undocumented_decisions && scan.undocumented_decisions.length > 0) {
+  log(`⚠ Undocumented decisions detected in: ${scan.undocumented_decisions.join(', ')} — run backlog decision create before implementing`)
+}
 
 if (scan.blocked_tasks.length > 0) {
   log(`Blocked: ${scan.blocked_tasks.map(t => `${t.id} (waiting on ${t.blocked_by})`).join(', ')}`)
@@ -559,6 +573,7 @@ return {
     })),
   },
   finalized: toFinalize,
+  undocumented_decisions: scan.undocumented_decisions,
   blocked_tasks: scan.blocked_tasks,
   action_required: reviewBlocked.length > 0
     ? `Fix review blockers:\n${reviewBlocked.map(r => `  ${r.task_id}: ${r.findings}`).join('\n')}`
