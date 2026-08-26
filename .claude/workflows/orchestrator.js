@@ -190,7 +190,7 @@ if (scan.eligible_spikes.length > 0) {
       // Claim the task
       await agent(
         `Run: backlog task edit ${spike.id} --status "In Progress"`,
-        { label: `claim:${spike.id}`, phase: 'Spikes', agentType: 'orchestrator' }
+        { label: `claim:${spike.id}`, phase: 'Spikes', agentType: 'orchestrator', model: 'haiku' }
       )
 
       // Run the spike
@@ -232,16 +232,16 @@ Return structured result with what you found.`,
       log(`Spike ${r.task_id} blocked: ${r.blockers}`)
       await agent(
         `Run: backlog task edit ${r.task_id} --status "To Do" && backlog task edit ${r.task_id} --notes "Blocker from spike: ${r.blockers}"`,
-        { label: `reset:${r.task_id}`, phase: 'Spikes', agentType: 'orchestrator' }
+        { label: `reset:${r.task_id}`, phase: 'Spikes', agentType: 'orchestrator', model: 'haiku' }
       )
     }
   }
 
-  // Move done spikes to Done status
+  // Move done spikes to In Review (finalizer will move to Done)
   for (const r of done) {
     await agent(
-      `Run: backlog task edit ${r.task_id} --status "Done"`,
-      { label: `finalize:${r.task_id}`, phase: 'Spikes', agentType: 'orchestrator' }
+      `Run: backlog task edit ${r.task_id} --status "In Review"`,
+      { label: `mark-review:${r.task_id}`, phase: 'Spikes', agentType: 'orchestrator', model: 'haiku' }
     )
   }
 }
@@ -288,7 +288,7 @@ Return groups as arrays of task IDs. Each group runs in parallel; groups run seq
         log(`Claiming ${task.id}`)
         await agent(
           `Run: backlog task edit ${task.id} --status "In Progress"`,
-          { label: `claim:${task.id}`, phase: 'Implement', agentType: 'orchestrator' }
+          { label: `claim:${task.id}`, phase: 'Implement', agentType: 'orchestrator', model: 'haiku' }
         )
 
         // Setup worktree
@@ -301,7 +301,7 @@ Run these commands in order:
 3. Verify: ls ${worktree}
 
 Report: worktree path and branch name.`,
-          { label: `worktree:${task.id}`, phase: 'Implement', agentType: 'orchestrator' }
+          { label: `worktree:${task.id}`, phase: 'Implement', agentType: 'orchestrator', model: 'haiku' }
         )
 
         // Run implementer
@@ -472,6 +472,7 @@ Return JSON: { merged: ["TASK-X", ...], pending: ["TASK-Y", ...], make_check_pas
           required: ['merged', 'pending', 'make_check_passed'],
         },
         agentType: 'orchestrator',
+        model: 'haiku',
       }
     )
 

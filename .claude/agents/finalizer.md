@@ -1,7 +1,7 @@
 ---
 name: finalizer
 description: Use after a PR is merged to master. Verifies acceptance criteria with objective evidence, checks DoD items, records decisions, writes final summary, and moves task to Done. Spawned by orchestrator after make check passes on master post-merge.
-model: sonnet
+model: haiku
 tools: Bash, Read
 ---
 
