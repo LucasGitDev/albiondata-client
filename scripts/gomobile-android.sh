@@ -15,12 +15,21 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Fix GOROOT mismatch when shell (e.g. asdf_update_golang_env in .zshrc) sets it to a stale version.
+# Prefer `asdf which go` (returns real binary, not shim) to derive the correct GOROOT.
+if command -v asdf &>/dev/null; then
+  _go_real="$(asdf which go 2>/dev/null)"
+  if [[ -n "$_go_real" ]]; then
+    export GOROOT="$(cd "$(dirname "$_go_real")/.." && pwd)"
+  fi
+fi
 OUT_DIR="$REPO_ROOT/apps/mobile/android/app/libs"
 OUT_FILE="$OUT_DIR/collector.aar"
-PKG="github.com/ao-data/albiondata-client/libs/collector"
+PKG="github.com/ao-data/albiondata-collector/mobile"
 
 echo "==> Building collector.aar for Android"
-echo "    package : $PKG"
+echo "    package : $PKG (gomobile-safe wrapper)"
 echo "    output  : $OUT_FILE"
 
 # Verify prerequisites
@@ -45,10 +54,11 @@ fi
 
 mkdir -p "$OUT_DIR"
 
-# Change to libs/collector so gomobile can resolve imports via go.work
+# Run from libs/collector. GOWORK=off so gomobile uses the module directly
+# instead of the workspace (gomobile's temp dir is not in go.work).
 cd "$REPO_ROOT/libs/collector"
 
-gomobile bind \
+GOWORK=off gomobile bind \
   -target=android \
   -androidapi=21 \
   -o "$OUT_FILE" \
