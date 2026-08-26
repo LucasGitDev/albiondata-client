@@ -4,7 +4,7 @@ set -eo pipefail
 
 sudo apt-get update && sudo apt-get install -y \
   libpcap-dev patchelf \
-  libgtk-3-dev libwebkit2gtk-4.0-dev
+  libgtk-3-dev libwebkit2gtk-4.1-dev
 
 env | sort
 
