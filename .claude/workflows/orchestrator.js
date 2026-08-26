@@ -1,14 +1,15 @@
 export const meta = {
   name: 'orchestrator',
-  description: 'Coordinate multi-agent task execution: scan backlog, run spikes in parallel, implement, review, finalize',
+  description: 'Continuous multi-agent orchestration: scan → PO consult → spikes+impl in parallel → review → finalize → loop',
   phases: [
-    { title: 'Scan', detail: 'Read backlog state and plan execution' },
+    { title: 'Scan', detail: 'Read backlog state and classify tasks' },
+    { title: 'PO', detail: 'Product Owner unblocks ambiguous spike questions' },
     { title: 'Spikes', detail: 'Run research agents in parallel' },
     { title: 'Implement', detail: 'Run implementer agents (parallelism-safe)' },
-    { title: 'Review', detail: 'Run reviewer + optional security auditor per task' },
-    { title: 'Merge', detail: 'Wait for user merge approval, verify master' },
-    { title: 'Finalize', detail: 'Check AC/DoD, record decisions, write final summary, mark Done' },
-    { title: 'Summary', detail: 'Report results' },
+    { title: 'Review', detail: 'Reviewer + optional security auditor per task' },
+    { title: 'Merge', detail: 'Poll for user merges, verify master' },
+    { title: 'Finalize', detail: 'AC/DoD check, decisions, final summary, mark Done' },
+    { title: 'Summary', detail: 'Report results and remaining board state' },
   ],
 }
 
@@ -25,8 +26,9 @@ const SCAN_SCHEMA = {
           id: { type: 'string' },
           title: { type: 'string' },
           description: { type: 'string' },
+          open_product_questions: { type: 'string', description: 'Unresolved product questions the PO should answer before spike starts. Empty string if none.' },
         },
-        required: ['id', 'title', 'description'],
+        required: ['id', 'title', 'description', 'open_product_questions'],
       },
     },
     eligible_tasks: {
@@ -54,8 +56,32 @@ const SCAN_SCHEMA = {
         required: ['id', 'blocked_by'],
       },
     },
+    in_review_tasks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          pr_url: { type: 'string' },
+          pr_number: { type: 'string' },
+          needs_security_audit: { type: 'boolean' },
+        },
+        required: ['id', 'needs_security_audit'],
+      },
+    },
   },
-  required: ['eligible_spikes', 'eligible_tasks', 'blocked_tasks'],
+  required: ['eligible_spikes', 'eligible_tasks', 'blocked_tasks', 'in_review_tasks'],
+}
+
+const PO_RESULT_SCHEMA = {
+  type: 'object',
+  properties: {
+    task_id: { type: 'string' },
+    decisions_created: { type: 'array', items: { type: 'string' } },
+    summary: { type: 'string' },
+    unresolved: { type: 'string', description: 'Any questions still requiring user input. Empty if none.' },
+  },
+  required: ['task_id', 'decisions_created', 'summary'],
 }
 
 const OVERLAP_SCHEMA = {
@@ -63,11 +89,8 @@ const OVERLAP_SCHEMA = {
   properties: {
     groups: {
       type: 'array',
-      description: 'Groups of task IDs that can run in parallel (no file overlap within group)',
-      items: {
-        type: 'array',
-        items: { type: 'string' },
-      },
+      description: 'Groups of task IDs that can run in parallel (no file overlap within group). Groups run sequentially.',
+      items: { type: 'array', items: { type: 'string' } },
     },
     reasoning: { type: 'string' },
   },
@@ -130,439 +153,487 @@ function branchName(taskId, title) {
   return `task/${taskId.toLowerCase()}-${slug}`
 }
 
-// ─── Phase 1: Scan ──────────────────────────────────────────────────────────
+// ─── State (accumulated across loop iterations) ──────────────────────────────
 
-phase('Scan')
+const allSpikeResults = []
+const allImplResults = []
+const allReviewResults = []
+const allMergedTaskIds = []
+const allFinalizedTaskIds = []
+const seenTaskIds = new Set()
 
-const scan = await agent(
-  `You are scanning the albiondata-client backlog to determine what can run next.
+// ─── Main loop ──────────────────────────────────────────────────────────────
+// Runs until: nothing eligible AND nothing in-review (everything blocked or done)
+
+let iteration = 0
+const MAX_ITERATIONS = 6
+
+while (iteration < MAX_ITERATIONS) {
+  iteration++
+  log(`=== Iteration ${iteration} ===`)
+
+  // ── Phase: Scan ────────────────────────────────────────────────────────────
+
+  phase('Scan')
+
+  const scan = await agent(
+    `You are scanning the albiondata-client backlog to classify all tasks.
 
 Working directory: ${ROOT}
 
-Run these commands and analyze the output:
+Run in order:
 1. \`backlog task list --plain\` — get all tasks and statuses
-2. For each "To Do" task: \`backlog task view TASK-X --plain\` to read description and dependencies
-3. For each "In Progress" task: check if it has an open PR via \`gh pr list --search "head:task/" --json number,headRefName,state\`
+2. For each "To Do" task: \`backlog task view TASK-X --plain\` to read description and deps
+3. \`gh pr list --json number,headRefName,url,state --jq '.[] | select(.state=="OPEN")'\` — open PRs
 
-Determine:
-- eligible_spikes: To Do tasks with type:spike where parent spike dependencies are Done
-- eligible_tasks: To Do non-spike tasks where all spike/parent dependencies are Done
-- blocked_tasks: To Do tasks still waiting on an incomplete dependency
-
-A task is blocked if its parent epic has an incomplete spike subtask that it depends on.
-Check task descriptions for explicit "depends on TASK-X" language.
+Classify:
+- eligible_spikes: To Do tasks with [spike] prefix where all dependencies are Done
+- eligible_tasks: To Do non-spike tasks where all deps (including spike deps) are Done
+- blocked_tasks: To Do tasks waiting on an incomplete dep (list what they're waiting on)
+- in_review_tasks: In Review tasks — include pr_url and pr_number if found via gh pr list
 
 Security audit needed for tasks mentioning: VPN, permissions, auth, token, network, storage, capture.
 
+For eligible_spikes: list any unresolved product questions (things the spike cannot answer without product direction).
+
 Return structured JSON.`,
-  { label: 'scan:backlog', phase: 'Scan', schema: SCAN_SCHEMA, agentType: 'orchestrator' }
-)
+    { label: `scan:${iteration}`, phase: 'Scan', schema: SCAN_SCHEMA, agentType: 'general-purpose' }
+  )
 
-if (!scan) {
-  log('Scan failed — aborting')
-  return { error: 'scan failed' }
-}
+  if (!scan) {
+    log('Scan failed — stopping loop')
+    break
+  }
 
-log(`Scan complete: ${scan.eligible_spikes.length} spikes, ${scan.eligible_tasks.length} tasks, ${scan.blocked_tasks.length} blocked`)
+  log(`Eligible: ${scan.eligible_spikes.length} spike(s), ${scan.eligible_tasks.length} task(s) | In Review: ${scan.in_review_tasks.length} | Blocked: ${scan.blocked_tasks.length}`)
+  if (scan.blocked_tasks.length > 0) {
+    log(`Blocked: ${scan.blocked_tasks.map(t => `${t.id}←${t.blocked_by}`).join(', ')}`)
+  }
 
-if (scan.blocked_tasks.length > 0) {
-  log(`Blocked: ${scan.blocked_tasks.map(t => `${t.id} (waiting on ${t.blocked_by})`).join(', ')}`)
-}
+  // Stop condition: nothing to do this iteration
+  const hasWork = scan.eligible_spikes.length > 0 || scan.eligible_tasks.length > 0 || scan.in_review_tasks.length > 0
+  if (!hasWork) {
+    log('Nothing eligible or in-review. Board is blocked or complete.')
+    break
+  }
 
-if (scan.eligible_spikes.length === 0 && scan.eligible_tasks.length === 0) {
-  log('Nothing eligible to run. All tasks are either Done, In Progress, or blocked.')
-  return { eligible_spikes: [], eligible_tasks: [], blocked_tasks: scan.blocked_tasks }
-}
+  // Prevent re-running already-started tasks
+  const freshSpikes = scan.eligible_spikes.filter(s => !seenTaskIds.has(s.id))
+  const freshTasks = scan.eligible_tasks.filter(t => !seenTaskIds.has(t.id))
+  const freshInReview = scan.in_review_tasks.filter(t => !seenTaskIds.has(t.id))
 
-// ─── Phase 2: Spikes (parallel) ─────────────────────────────────────────────
+  freshSpikes.forEach(s => seenTaskIds.add(s.id))
+  freshTasks.forEach(t => seenTaskIds.add(t.id))
+  freshInReview.forEach(t => seenTaskIds.add(t.id))
 
-phase('Spikes')
+  if (freshSpikes.length === 0 && freshTasks.length === 0 && freshInReview.length === 0) {
+    log('No new work this iteration — waiting for external state change (merges). Stopping.')
+    break
+  }
 
-let spikeResults = []
+  // ── Phase: PO (product questions on spikes) ────────────────────────────────
 
-if (scan.eligible_spikes.length > 0) {
-  log(`Running ${scan.eligible_spikes.length} spike(s) in parallel`)
+  const spikesWithQuestions = freshSpikes.filter(s => s.open_product_questions && s.open_product_questions.trim().length > 0)
 
-  spikeResults = await parallel(
-    scan.eligible_spikes.map(spike => async () => {
-      log(`Claiming ${spike.id}`)
+  if (spikesWithQuestions.length > 0) {
+    phase('PO')
+    log(`PO consulting on ${spikesWithQuestions.length} spike(s) with open product questions`)
 
-      // Claim the task
-      await agent(
-        `Run: backlog task edit ${spike.id} --status "In Progress"`,
-        { label: `claim:${spike.id}`, phase: 'Spikes', agentType: 'orchestrator', model: 'haiku' }
-      )
+    await parallel(
+      spikesWithQuestions.map(spike => async () => {
+        const poResult = await agent(
+          `You are a Product Owner agent for the albiondata-client project.
 
-      // Run the spike
-      return agent(
-        `You are a Spike/Research agent executing ${spike.id}: ${spike.title}
+Task needing product direction: ${spike.id} — ${spike.title}
+Open product questions: ${spike.open_product_questions}
 
-Task: ${spike.id}
-Title: ${spike.title}
-Description: ${spike.description}
+Steps:
+1. Read product context:
+   - \`backlog doc view doc-4 --plain\`
+   - \`backlog doc view doc-5 --plain\`
+   - \`backlog doc view doc-6 --plain\`
+   - \`backlog decision list --plain\`
+2. Answer each open question with a concrete decision aligned with product goals
+3. For each decision: \`backlog decision create "title" -s accepted\`
+   Then write full content (options, rationale, chosen approach) to the returned file path
+4. Add notes to task: \`backlog task edit ${spike.id} --notes "PO decisions: <summary of choices made>"\`
+
+Product priorities (in order):
+- Android-idiomatic > Go-idiomatic when there's a conflict
+- MVP simplicity (works end-to-end) > completeness
+- Private data security (token never plaintext) is non-negotiable
+- Desktop parity: mobile replicates TASK-7 + TASK-9 behavior
+
+Make concrete choices. Do not defer — "decide and note assumption" beats "wait for human".
+
+Return structured result.`,
+          {
+            label: `po:${spike.id}`,
+            phase: 'PO',
+            schema: PO_RESULT_SCHEMA,
+            agentType: 'general-purpose',
+          }
+        )
+
+        if (poResult && poResult.unresolved && poResult.unresolved.trim().length > 0) {
+          log(`PO: ${spike.id} still has unresolved questions requiring user: ${poResult.unresolved}`)
+        }
+
+        return poResult
+      })
+    )
+  }
+
+  // ── Phase: Spikes (parallel) ───────────────────────────────────────────────
+
+  let iterSpikeResults = []
+
+  if (freshSpikes.length > 0) {
+    phase('Spikes')
+    log(`Running ${freshSpikes.length} spike(s) in parallel`)
+
+    iterSpikeResults = (await parallel(
+      freshSpikes.map(spike => async () => {
+        await agent(
+          `Run: cd ${ROOT} && backlog task edit ${spike.id} --status "In Progress"`,
+          { label: `claim:${spike.id}`, phase: 'Spikes', agentType: 'general-purpose' }
+        )
+
+        return agent(
+          `You are a Spike/Research agent executing ${spike.id}: ${spike.title}
 
 Working directory: ${ROOT}
 
 Steps:
 1. Read the full task: \`backlog task view ${spike.id} --plain\`
-2. Research all acceptance criteria in the task
-3. Create a backlog decision: \`backlog decision create "your-decision-title"\`
-4. Add implementation notes: \`backlog task edit ${spike.id} --notes "your notes here"\`
-5. Move to In Review: \`backlog task edit ${spike.id} --status "In Review"\`
+2. Read relevant product docs and prior decisions:
+   - \`backlog doc view doc-4 --plain\`
+   - \`backlog doc view doc-5 --plain\`
+   - \`backlog doc view doc-6 --plain\`
+   - \`backlog decision list --plain\`
+3. Research ALL acceptance criteria in the task (web search, read code as needed)
+4. Create a backlog decision: \`backlog decision create "title" -s accepted\`
+   Write full content to returned file path (options evaluated, tradeoffs, chosen approach, rationale)
+5. Add implementation notes: \`backlog task edit ${spike.id} --notes "Research findings: ..."\`
+6. Move to In Review: \`backlog task edit ${spike.id} --status "In Review"\`
 
-Research using web search and reading existing code as needed.
-Return structured result with what you found.`,
-        {
-          label: `spike:${spike.id}`,
-          phase: 'Spikes',
-          schema: SPIKE_RESULT_SCHEMA,
-          agentType: 'spike',
-        }
-      )
-    })
-  )
-
-  spikeResults = spikeResults.filter(Boolean)
-  const done = spikeResults.filter(r => r.status === 'done')
-  const blocked = spikeResults.filter(r => r.status === 'blocked')
-  log(`Spikes: ${done.length} done, ${blocked.length} blocked`)
-
-  if (blocked.length > 0) {
-    for (const r of blocked) {
-      log(`Spike ${r.task_id} blocked: ${r.blockers}`)
-      await agent(
-        `Run: backlog task edit ${r.task_id} --status "To Do" && backlog task edit ${r.task_id} --notes "Blocker from spike: ${r.blockers}"`,
-        { label: `reset:${r.task_id}`, phase: 'Spikes', agentType: 'orchestrator', model: 'haiku' }
-      )
-    }
-  }
-
-  // Move done spikes to In Review (finalizer will move to Done)
-  for (const r of done) {
-    await agent(
-      `Run: backlog task edit ${r.task_id} --status "In Review"`,
-      { label: `mark-review:${r.task_id}`, phase: 'Spikes', agentType: 'orchestrator', model: 'haiku' }
-    )
-  }
-}
-
-// ─── Phase 3: Implement ─────────────────────────────────────────────────────
-
-phase('Implement')
-
-let implResults = []
-
-if (scan.eligible_tasks.length > 0) {
-  // Determine parallelism groups via overlap check
-  const overlapCheck = await agent(
-    `You are checking file overlap between tasks to determine safe parallelism.
-
-Tasks to analyze:
-${scan.eligible_tasks.map(t => `- ${t.id}: ${t.title} (scope hint: ${t.file_scope_hint})`).join('\n')}
-
-Files that ALWAYS serialize (never parallelize tasks touching these):
-- go.mod, go.work
-- AndroidManifest.xml, Info.plist
-- Any exported types in collector/ package
-- Any shared data model or API interface file
-
-Based on scope hints and task descriptions, group tasks that can safely run in parallel.
-Tasks with overlapping file scopes MUST be in separate groups (serialized).
-Return groups as arrays of task IDs. Each group runs in parallel; groups run sequentially.`,
-    { label: 'overlap:check', phase: 'Implement', schema: OVERLAP_SCHEMA, agentType: 'orchestrator' }
-  )
-
-  const groups = overlapCheck ? overlapCheck.groups : [scan.eligible_tasks.map(t => t.id)]
-  log(`Parallelism: ${groups.length} group(s) — ${groups.map(g => g.join('+')).join(' → ')}`)
-
-  for (const group of groups) {
-    const groupTasks = group
-      .map(id => scan.eligible_tasks.find(t => t.id === id))
-      .filter(Boolean)
-
-    const groupResults = await parallel(
-      groupTasks.map(task => async () => {
-        const branch = branchName(task.id, task.title)
-        const worktree = worktreePath(task.id)
-
-        log(`Claiming ${task.id}`)
-        await agent(
-          `Run: backlog task edit ${task.id} --status "In Progress"`,
-          { label: `claim:${task.id}`, phase: 'Implement', agentType: 'orchestrator', model: 'haiku' }
-        )
-
-        // Setup worktree
-        await agent(
-          `Setup git worktree for task ${task.id}.
-
-Run these commands in order:
-1. cd ${ROOT}
-2. git worktree add ${worktree} -b ${branch} 2>/dev/null || git worktree add ${worktree} ${branch}
-3. Verify: ls ${worktree}
-
-Report: worktree path and branch name.`,
-          { label: `worktree:${task.id}`, phase: 'Implement', agentType: 'orchestrator', model: 'haiku' }
-        )
-
-        // Run implementer
-        return agent(
-          `You are an Implementer agent executing ${task.id}: ${task.title}
-
-Task ID: ${task.id}
-Branch: ${branch}
-Worktree: ${worktree}
-Main repo: ${ROOT}
-
-Your working directory is the worktree: ${worktree}
-
-Steps:
-1. Read the full task: \`backlog task view ${task.id} --plain\` (run from ${ROOT})
-2. Verify you are in the worktree: \`pwd\` should be ${worktree}
-3. Implement all acceptance criteria — stay within task scope
-4. Do NOT modify client/ or lib/ unless task explicitly requires it
-5. Run quality gate: \`cd ${ROOT} && make check\` — fix issues, max 3 attempts
-6. Open PR: \`gh pr create --title "type(scope): ${task.title} (${task.id})" --body "$(cat ${ROOT}/.github/pull_request_template.md)"\`
-7. Move to In Review: \`backlog task edit ${task.id} --status "In Review"\` (run from ${ROOT})
-
-If make check fails 3 times: move task to "To Do" with blocker note and return status: "blocked".
-Commit format: Conventional Commits, no Co-Authored-By trailers.
+Rules:
+- NEVER write or edit source code files
+- NEVER commit anything
+- If you hit a genuine blocker (API doesn't exist, OS restriction), flag it explicitly
 
 Return structured result.`,
           {
-            label: `impl:${task.id}`,
-            phase: 'Implement',
-            schema: IMPL_RESULT_SCHEMA,
-            agentType: 'implementer',
+            label: `spike:${spike.id}`,
+            phase: 'Spikes',
+            schema: SPIKE_RESULT_SCHEMA,
+            agentType: 'general-purpose',
           }
         )
       })
-    )
+    )).filter(Boolean)
 
-    implResults = implResults.concat(groupResults.filter(Boolean))
+    allSpikeResults.push(...iterSpikeResults)
+
+    const spikesDone = iterSpikeResults.filter(r => r.status === 'done')
+    const spikesBlocked = iterSpikeResults.filter(r => r.status === 'blocked')
+    log(`Spikes: ${spikesDone.length} done, ${spikesBlocked.length} blocked`)
+
+    for (const r of spikesBlocked) {
+      await agent(
+        `Run: cd ${ROOT} && backlog task edit ${r.task_id} --status "To Do" && backlog task edit ${r.task_id} --notes "Spike blocker: ${r.blockers}"`,
+        { label: `reset:${r.task_id}`, phase: 'Spikes', agentType: 'general-purpose' }
+      )
+    }
   }
 
-  const implDone = implResults.filter(r => r.status === 'in_review')
-  const implBlocked = implResults.filter(r => r.status !== 'in_review')
-  log(`Implement: ${implDone.length} in review, ${implBlocked.length} blocked/escalated`)
-}
+  // ── Phase: Implement (parallel groups) ────────────────────────────────────
 
-// ─── Phase 4: Review ────────────────────────────────────────────────────────
+  let iterImplResults = []
 
-phase('Review')
+  if (freshTasks.length > 0) {
+    phase('Implement')
 
-const inReview = implResults.filter(r => r.status === 'in_review' && r.pr_url)
+    const overlapCheck = await agent(
+      `Check file overlap between tasks to determine safe parallelism groups.
 
-const reviewResults = await parallel(
-  inReview.map(impl => async () => {
-    const task = scan.eligible_tasks.find(t => t.id === impl.task_id)
+Tasks:
+${freshTasks.map(t => `- ${t.id}: ${t.title} (scope: ${t.file_scope_hint})`).join('\n')}
 
-    // Code review
-    const review = await agent(
-      `You are a Reviewer agent for ${impl.task_id}.
+Always serialize tasks touching: go.mod, go.work, AndroidManifest.xml, Info.plist, exported types in collector/
+Group tasks with no file overlap together (parallel). Tasks with overlap in separate groups (sequential).
 
-PR: ${impl.pr_url || 'find via gh pr list'}
-Task: ${impl.task_id}
-Main repo: ${ROOT}
-
-Steps:
-1. Read task: \`backlog task view ${impl.task_id} --plain\`
-2. Get diff: \`gh pr diff ${impl.pr_number || impl.task_id}\`
-3. Review against acceptance criteria, scope, correctness, security basics
-4. Write findings to task: \`backlog task edit ${impl.task_id} --notes "Review: <findings>"\`
-5. Comment on PR with verdict
-
-Output format for findings: path:line: 🔴/🟠/🟡/🔵 SEVERITY: problem. fix.
-Verdict: LGTM or BLOCKED: reason`,
-      {
-        label: `review:${impl.task_id}`,
-        phase: 'Review',
-        schema: REVIEW_RESULT_SCHEMA,
-        agentType: 'reviewer',
-      }
+Return groups as arrays of task IDs.`,
+      { label: `overlap:${iteration}`, phase: 'Implement', schema: OVERLAP_SCHEMA, agentType: 'general-purpose' }
     )
 
-    if (!review) return null
+    const groups = overlapCheck ? overlapCheck.groups : [freshTasks.map(t => t.id)]
+    log(`Parallelism: ${groups.map(g => g.join('+')).join(' → ')}`)
 
-    // Security audit if needed
-    let secVerdict = 'SKIPPED'
-    let secFindings = ''
+    for (const group of groups) {
+      const groupTasks = group.map(id => freshTasks.find(t => t.id === id)).filter(Boolean)
 
-    if (task && task.needs_security_audit) {
-      log(`Security audit triggered for ${impl.task_id}`)
-      const secAudit = await agent(
-        `You are a Security Auditor for ${impl.task_id}.
+      const groupResults = await parallel(
+        groupTasks.map(task => async () => {
+          const branch = branchName(task.id, task.title)
+          const worktree = worktreePath(task.id)
+
+          await agent(
+            `Run: cd ${ROOT} && backlog task edit ${task.id} --status "In Progress"`,
+            { label: `claim:${task.id}`, phase: 'Implement', agentType: 'general-purpose' }
+          )
+
+          await agent(
+            `Setup git worktree for ${task.id}.
+cd ${ROOT}
+git worktree add ${worktree} -b ${branch} 2>/dev/null || git worktree add ${worktree} ${branch}
+Verify: ls ${worktree}`,
+            { label: `worktree:${task.id}`, phase: 'Implement', agentType: 'general-purpose' }
+          )
+
+          return agent(
+            `You are an Implementer agent executing ${task.id}: ${task.title}
+
+Worktree: ${worktree}
+Branch: ${branch}
+Main repo: ${ROOT}
+
+Steps:
+1. Read task: \`backlog task view ${task.id} --plain\` (run from ${ROOT})
+2. Read relevant decisions: \`backlog decision list --plain\`
+3. Work in worktree: all file edits in ${worktree}
+4. Implement all acceptance criteria. Stay within task scope.
+5. Do NOT touch client/ or lib/ unless task explicitly requires it.
+6. Run quality gate: \`cd ${ROOT} && make check\` — fix issues, max 3 attempts
+7. Open PR: \`cd ${worktree} && gh pr create --title "feat(scope): ${task.title} (${task.id})" --body "Closes ${task.id}. See task for AC."\`
+8. Move to In Review: \`cd ${ROOT} && backlog task edit ${task.id} --status "In Review"\`
+
+Commit format: Conventional Commits. No Co-Authored-By trailers.
+If make check fails 3x: move task to "To Do" with blocker note, return status "blocked".
+
+Return structured result.`,
+            {
+              label: `impl:${task.id}`,
+              phase: 'Implement',
+              schema: IMPL_RESULT_SCHEMA,
+              agentType: 'general-purpose',
+            }
+          )
+        })
+      )
+
+      iterImplResults.push(...groupResults.filter(Boolean))
+    }
+
+    allImplResults.push(...iterImplResults)
+    log(`Implement: ${iterImplResults.filter(r => r.status === 'in_review').length} in review, ${iterImplResults.filter(r => r.status !== 'in_review').length} blocked`)
+  }
+
+  // ── Phase: Review (includes pre-existing in-review tasks) ─────────────────
+
+  const toReview = [
+    ...iterImplResults.filter(r => r.status === 'in_review' && r.pr_url),
+    ...freshInReview.map(t => ({ task_id: t.id, pr_url: t.pr_url, pr_number: t.pr_number, needs_security_audit: t.needs_security_audit })),
+  ]
+
+  if (toReview.length > 0) {
+    phase('Review')
+    log(`Reviewing ${toReview.length} task(s)`)
+
+    const iterReviewResults = (await parallel(
+      toReview.map(impl => async () => {
+        const taskMeta = scan.eligible_tasks.find(t => t.id === impl.task_id)
+          || scan.in_review_tasks.find(t => t.id === impl.task_id)
+
+        const review = await agent(
+          `You are a Reviewer agent for ${impl.task_id}.
+
+PR: ${impl.pr_url || 'find via: gh pr list --search "head:task/" --json number,headRefName,url'}
+Main repo: ${ROOT}
+
+Steps:
+1. \`backlog task view ${impl.task_id} --plain\`
+2. \`gh pr diff ${impl.pr_number || impl.task_id} 2>/dev/null || gh pr list --search "${impl.task_id}" --json number,url\`
+3. Review: scope, acceptance criteria, correctness, no core/ violations, no Co-Authored-By in commits
+4. \`backlog task edit ${impl.task_id} --notes "Code review: <verdict> — <findings>"\`
+
+Finding format: path:line: 🔴CRITICAL/🟠HIGH/🟡MEDIUM/🔵INFO: problem. fix.
+Verdict: LGTM or BLOCKED: <reason>`,
+          {
+            label: `review:${impl.task_id}`,
+            phase: 'Review',
+            schema: REVIEW_RESULT_SCHEMA,
+            agentType: 'general-purpose',
+          }
+        )
+
+        if (!review) return null
+
+        let secVerdict = 'SKIPPED'
+        let secFindings = ''
+
+        const needsAudit = taskMeta ? taskMeta.needs_security_audit : false
+        if (needsAudit) {
+          log(`Security audit: ${impl.task_id}`)
+          const secAudit = await agent(
+            `You are a Security Auditor for ${impl.task_id}.
 
 PR: ${impl.pr_url || 'find via gh pr list'}
 Main repo: ${ROOT}
 
 Steps:
-1. Get diff: \`gh pr diff ${impl.pr_number || impl.task_id}\`
-2. Run security audit checklist (auth tokens, network TLS, permissions, VPN, storage)
-3. Write findings: \`backlog task edit ${impl.task_id} --notes "Security audit: <verdict> — <findings>"\`
+1. \`gh pr diff ${impl.pr_number || impl.task_id}\`
+2. Audit: auth tokens (never plaintext/logcat), network TLS, Android permissions, VPN service isolation, token storage (Keystore only)
+3. \`backlog task edit ${impl.task_id} --notes "Security audit: <PASS|BLOCKED> — <findings>"\`
 
-Output: SECURITY: PASS or SECURITY: BLOCKED — <findings>`,
+CRITICAL findings block merge.`,
+            {
+              label: `security:${impl.task_id}`,
+              phase: 'Review',
+              schema: REVIEW_RESULT_SCHEMA,
+              agentType: 'general-purpose',
+            }
+          )
+
+          if (secAudit) {
+            secVerdict = secAudit.security_verdict || secAudit.verdict
+            secFindings = secAudit.security_findings || secAudit.findings || ''
+          }
+        }
+
+        return {
+          task_id: impl.task_id,
+          pr_url: impl.pr_url,
+          pr_number: impl.pr_number,
+          verdict: review.verdict,
+          findings: review.findings,
+          security_verdict: secVerdict,
+          security_findings: secFindings,
+          merge_ready: review.verdict === 'LGTM' && secVerdict !== 'BLOCKED',
+        }
+      })
+    )).filter(Boolean)
+
+    allReviewResults.push(...iterReviewResults)
+  }
+
+  // ── Phase: Merge poll ─────────────────────────────────────────────────────
+
+  const mergeReady = allReviewResults.filter(r => r.merge_ready && !allMergedTaskIds.includes(r.task_id))
+
+  if (mergeReady.length > 0) {
+    phase('Merge')
+    log(`${mergeReady.length} PR(s) ready to merge:`)
+    mergeReady.forEach(r => log(`  ${r.task_id}: ${r.pr_url || '(url via gh pr list)'}`))
+    log('Polling for merges (user must approve in GitHub)...')
+
+    // Poll a few times then continue — don't block the loop
+    for (let p = 0; p < 3; p++) {
+      const mergeStatus = await agent(
+        `Check merge status for these PRs:
+${mergeReady.map(r => `- ${r.task_id}: ${r.pr_url || 'find via gh pr list'}`).join('\n')}
+
+For each: \`gh pr view <number> --json state,mergedAt --jq '{number,state,mergedAt}'\`
+After any detected merge: \`cd ${ROOT} && git pull && make check\`
+
+Return: { merged: ["TASK-X",...], pending: ["TASK-Y",...], make_check_passed: true/false }`,
         {
-          label: `security:${impl.task_id}`,
-          phase: 'Review',
-          schema: REVIEW_RESULT_SCHEMA,
-          agentType: 'security-auditor',
+          label: `merge-poll:${iteration}-${p}`,
+          phase: 'Merge',
+          schema: {
+            type: 'object',
+            properties: {
+              merged: { type: 'array', items: { type: 'string' } },
+              pending: { type: 'array', items: { type: 'string' } },
+              make_check_passed: { type: 'boolean' },
+            },
+            required: ['merged', 'pending', 'make_check_passed'],
+          },
+          agentType: 'general-purpose',
         }
       )
 
-      if (secAudit) {
-        secVerdict = secAudit.security_verdict || secAudit.verdict
-        secFindings = secAudit.security_findings || secAudit.findings || ''
-      }
-    }
-
-    const mergeReady = review.verdict === 'LGTM' && secVerdict !== 'BLOCKED'
-
-    return {
-      task_id: impl.task_id,
-      pr_url: impl.pr_url,
-      pr_number: impl.pr_number,
-      verdict: review.verdict,
-      findings: review.findings,
-      security_verdict: secVerdict,
-      security_findings: secFindings,
-      merge_ready: mergeReady,
-    }
-  })
-)
-
-// ─── Phase 5: Merge gate ────────────────────────────────────────────────────
-
-phase('Merge')
-
-const reviewed = reviewResults.filter(Boolean)
-const mergeReady = reviewed.filter(r => r.merge_ready)
-const reviewBlocked = reviewed.filter(r => !r.merge_ready)
-
-log(`Review complete: ${mergeReady.length} ready to merge, ${reviewBlocked.length} blocked`)
-
-// Orchestrator cannot push to master — user must approve merge.
-// We poll until merged PRs appear on master, then run finalization.
-let mergedTaskIds = []
-
-if (mergeReady.length > 0) {
-  log(`Waiting for user to merge ${mergeReady.length} PR(s)...`)
-  log(`PRs ready:\n${mergeReady.map(r => `  ${r.task_id}: ${r.pr_url}`).join('\n')}`)
-
-  // Poll until all ready PRs are merged or budget runs out
-  const maxPolls = 12 // ~12 checks
-  for (let i = 0; i < maxPolls; i++) {
-    const mergeStatus = await agent(
-      `Check if these PRs are merged into master:
-${mergeReady.map(r => `- PR: ${r.pr_url} (${r.task_id})`).join('\n')}
-
-For each PR run: gh pr view <number> --json state,mergedAt --jq '{state,mergedAt}'
-Also run: make check on master after any merge: cd ${ROOT} && git pull && make check
-
-Return JSON: { merged: ["TASK-X", ...], pending: ["TASK-Y", ...], make_check_passed: true/false }`,
-      {
-        label: `merge:poll-${i}`,
-        phase: 'Merge',
-        schema: {
-          type: 'object',
-          properties: {
-            merged: { type: 'array', items: { type: 'string' } },
-            pending: { type: 'array', items: { type: 'string' } },
-            make_check_passed: { type: 'boolean' },
-          },
-          required: ['merged', 'pending', 'make_check_passed'],
-        },
-        agentType: 'orchestrator',
-        model: 'haiku',
-      }
-    )
-
-    if (mergeStatus) {
-      mergedTaskIds = mergeStatus.merged
-      if (!mergeStatus.make_check_passed && mergeStatus.merged.length > 0) {
-        log(`WARNING: make check failed on master after merge — tasks NOT moving to Done`)
-      }
-      if (mergeStatus.pending.length === 0 || mergedTaskIds.length === mergeReady.length) {
-        break
+      if (mergeStatus && mergeStatus.merged.length > 0) {
+        allMergedTaskIds.push(...mergeStatus.merged.filter(id => !allMergedTaskIds.includes(id)))
+        if (!mergeStatus.make_check_passed) {
+          log(`WARNING: make check failed on master after merge — tasks held from Done`)
+        }
+        if (mergeStatus.pending.length === 0) break
       }
     }
   }
-}
 
-// ─── Phase 6: Finalize ──────────────────────────────────────────────────────
+  // ── Phase: Finalize ────────────────────────────────────────────────────────
 
-phase('Finalize')
+  const toFinalize = [
+    ...allSpikeResults.filter(r => r.status === 'done').map(r => r.task_id),
+    ...allMergedTaskIds,
+  ].filter(id => !allFinalizedTaskIds.includes(id))
 
-const toFinalize = [
-  ...spikeResults.filter(r => r.status === 'done').map(r => r.task_id),
-  ...mergedTaskIds,
-]
+  if (toFinalize.length > 0) {
+    phase('Finalize')
 
-const finalizationResults = await parallel(
-  toFinalize.map(taskId => async () =>
-    agent(
-      `You are a Finalizer agent closing task ${taskId} after successful merge and make check on master.
+    await parallel(
+      toFinalize.map(taskId => async () => {
+        const result = await agent(
+          `You are a Finalizer agent closing task ${taskId} after successful merge.
 
-Task ID: ${taskId}
+Task: ${taskId}
 Main repo: ${ROOT}
 
-Follow the finalization guide exactly:
-1. backlog instructions task-finalization
-2. backlog task view ${taskId} --plain
-3. Verify each acceptance criterion with objective evidence (run commands, check output)
-4. Check AC items: backlog task edit ${taskId} --check-ac <n> (only with evidence)
-5. Check DoD items: backlog task edit ${taskId} --check-dod <n>
-6. Create any missing backlog decisions: backlog decision create "..."
-7. Append final notes: backlog task edit ${taskId} --append-notes "..."
-8. Write final summary: backlog task edit ${taskId} --final-summary "..."
-9. Move to Done: backlog task edit ${taskId} --status "Done"
-
-Be thorough — this is the permanent record of the task.`,
-      {
-        label: `finalize:${taskId}`,
-        phase: 'Finalize',
-        agentType: 'finalizer',
-      }
+Follow finalization guide:
+1. \`backlog instructions task-finalization\`
+2. \`backlog task view ${taskId} --plain\`
+3. Verify each acceptance criterion with evidence (run commands)
+4. \`backlog task edit ${taskId} --check-ac <n>\` (only with evidence)
+5. \`backlog task edit ${taskId} --check-dod <n>\`
+6. Create missing decisions: \`backlog decision create "..." -s accepted\`
+7. \`backlog task edit ${taskId} --append-notes "Final notes: ..."\`
+8. \`backlog task edit ${taskId} --final-summary "..."\`
+9. \`backlog task edit ${taskId} --status "Done"\``,
+          {
+            label: `finalize:${taskId}`,
+            phase: 'Finalize',
+            agentType: 'general-purpose',
+          }
+        )
+        if (result) allFinalizedTaskIds.push(taskId)
+        return result
+      })
     )
-  )
-)
 
-log(`Finalized ${finalizationResults.filter(Boolean).length}/${toFinalize.length} tasks`)
+    log(`Finalized: ${allFinalizedTaskIds.length} total`)
+  }
 
-// ─── Phase 7: Summary ───────────────────────────────────────────────────────
+  // Continue loop — next iteration picks up newly unblocked tasks
+  log(`Iteration ${iteration} complete. Continuing to check for newly eligible tasks...`)
+}
+
+// ─── Summary ────────────────────────────────────────────────────────────────
 
 phase('Summary')
 
+const reviewBlocked = allReviewResults.filter(r => !r.merge_ready)
+const mergeReadyFinal = allReviewResults.filter(r => r.merge_ready && !allMergedTaskIds.includes(r.task_id))
+
 return {
+  iterations: iteration,
   spikes: {
-    ran: spikeResults.length,
-    done: spikeResults.filter(r => r.status === 'done').map(r => r.task_id),
-    blocked: spikeResults.filter(r => r.status === 'blocked').map(r => r.task_id),
+    done: allSpikeResults.filter(r => r.status === 'done').map(r => r.task_id),
+    blocked: allSpikeResults.filter(r => r.status === 'blocked').map(r => r.task_id),
   },
   implementation: {
-    ran: implResults.length,
-    in_review: implResults.filter(r => r.status === 'in_review').map(r => r.task_id),
-    blocked: implResults.filter(r => r.status !== 'in_review').map(r => r.task_id),
+    in_review: allImplResults.filter(r => r.status === 'in_review').map(r => r.task_id),
+    blocked: allImplResults.filter(r => r.status !== 'in_review').map(r => r.task_id),
   },
   review: {
-    merge_ready: mergeReady.map(r => ({
-      task_id: r.task_id,
-      pr_url: r.pr_url,
-      verdict: r.verdict,
-      security_verdict: r.security_verdict,
-    })),
-    blocked: reviewBlocked.map(r => ({
-      task_id: r.task_id,
-      verdict: r.verdict,
-      findings: r.findings,
-      security_verdict: r.security_verdict,
-      security_findings: r.security_findings,
-    })),
+    merge_ready: mergeReadyFinal.map(r => ({ task_id: r.task_id, pr_url: r.pr_url })),
+    blocked: reviewBlocked.map(r => ({ task_id: r.task_id, verdict: r.verdict, findings: r.findings })),
   },
-  finalized: toFinalize,
-  blocked_tasks: scan.blocked_tasks,
-  action_required: reviewBlocked.length > 0
-    ? `Fix review blockers:\n${reviewBlocked.map(r => `  ${r.task_id}: ${r.findings}`).join('\n')}`
-    : mergeReady.length > 0 && mergedTaskIds.length < mergeReady.length
-      ? `Still pending merge:\n${mergeReady.filter(r => !mergedTaskIds.includes(r.task_id)).map(r => `  ${r.task_id}: ${r.pr_url}`).join('\n')}`
-      : 'All tasks finalized.',
+  merged: allMergedTaskIds,
+  finalized: allFinalizedTaskIds,
+  action_required: [
+    ...reviewBlocked.map(r => `Fix review blockers — ${r.task_id}: ${r.findings}`),
+    ...mergeReadyFinal.map(r => `Merge pending — ${r.task_id}: ${r.pr_url || 'check gh pr list'}`),
+  ].join('\n') || 'All work finalized.',
 }
