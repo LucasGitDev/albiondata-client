@@ -4,67 +4,101 @@ import android.app.Activity
 import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.albiondata.client.auth.OAuthManager
+import com.albiondata.client.ui.SettingsScreen
+import com.albiondata.client.ui.StatusScreen
 import com.albiondata.client.ui.theme.AlbionDataClientTheme
+import kotlinx.coroutines.launch
+
+private const val TAG = "MainActivity"
+
+// TODO: Replace with real Google OAuth client ID from google-services.json.
+// Left as a compile-time constant so it can be injected via buildConfigField in CI.
+private const val GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com"
+
+private object Nav {
+    const val STATUS = "status"
+    const val SETTINGS = "settings"
+}
 
 class MainActivity : ComponentActivity() {
 
-    // Known limitation (TASK-11.10): captureRunning is Activity-local state.
-    // If the OS restarts the service via START_STICKY, the UI will incorrectly show idle.
-    // Acceptable for validation phase; must be replaced with service-bound state before prod.
-    private var captureRunning by mutableStateOf(false)
+    private val viewModel: AppViewModel by viewModels()
+    private lateinit var oauthManager: OAuthManager
 
     private val vpnPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
+        ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             launchVpnService()
         }
     }
 
+    private val oauthLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            handleOAuthResult(result.data!!)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        oauthManager = OAuthManager(this)
+
         setContent {
             AlbionDataClientTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    StatusScreen(
-                        modifier = Modifier.padding(innerPadding),
-                        captureRunning = captureRunning,
-                        onStartCapture = { requestVpnPermission() },
-                        onStopCapture = { stopVpnService() },
-                    )
+                val navController = rememberNavController()
+                val uiState by viewModel.uiState.collectAsState()
+                val scope = rememberCoroutineScope()
+
+                NavHost(navController = navController, startDestination = Nav.STATUS) {
+                    composable(Nav.STATUS) {
+                        StatusScreen(
+                            uiState = uiState,
+                            onStartCapture = { requestVpnPermission() },
+                            onStopCapture = { stopVpnService() },
+                            onOpenSettings = { navController.navigate(Nav.SETTINGS) },
+                            onLoginRequired = { navController.navigate(Nav.SETTINGS) },
+                        )
+                    }
+                    composable(Nav.SETTINGS) {
+                        SettingsScreen(
+                            settings = uiState.settings,
+                            onBack = { navController.popBackStack() },
+                            onPrivateModeToggle = { enabled ->
+                                viewModel.setPrivateMode(enabled)
+                            },
+                            onIngestUrlSave = { url -> viewModel.setIngestUrl(url) },
+                            onLoginClick = { startOAuthFlow() },
+                            onLogoutClick = {
+                                viewModel.logout()
+                                // Stop capture if running in private mode.
+                                if (uiState.captureRunning) stopVpnService()
+                            },
+                        )
+                    }
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        oauthManager.destroy()
+        super.onDestroy()
     }
 
     private fun requestVpnPermission() {
@@ -81,7 +115,7 @@ class MainActivity : ComponentActivity() {
             action = PacketCaptureVpnService.ACTION_START
         }
         startForegroundService(intent)
-        captureRunning = true
+        viewModel.setCaptureRunning(true)
     }
 
     private fun stopVpnService() {
@@ -89,59 +123,29 @@ class MainActivity : ComponentActivity() {
             action = PacketCaptureVpnService.ACTION_STOP
         }
         startService(intent)
-        captureRunning = false
+        viewModel.setCaptureRunning(false)
     }
-}
 
-@Composable
-fun StatusScreen(
-    modifier: Modifier = Modifier,
-    captureRunning: Boolean = false,
-    onStartCapture: () -> Unit = {},
-    onStopCapture: () -> Unit = {},
-) {
-    Column(
-        modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = "Albion Data Client",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = if (captureRunning) "Status: capturing" else "Status: idle",
-            fontSize = 16.sp,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Button(
-                onClick = onStartCapture,
-                enabled = !captureRunning,
-            ) {
-                Text(text = stringResource(R.string.start_capture))
-            }
-            Button(
-                onClick = onStopCapture,
-                enabled = captureRunning,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error,
-                ),
-            ) {
-                Text(text = stringResource(R.string.stop_capture))
+    private fun startOAuthFlow() {
+        if (GOOGLE_CLIENT_ID.startsWith("YOUR_")) {
+            Log.w(TAG, "Google OAuth client ID not configured — skipping auth flow")
+            return
+        }
+        val authIntent = oauthManager.buildAuthIntent(GOOGLE_CLIENT_ID)
+        oauthLauncher.launch(authIntent)
+    }
+
+    private fun handleOAuthResult(data: Intent) {
+        // Launch coroutine to exchange code for tokens.
+        // coroutineScope not available here; use lifecycle scope.
+        androidx.lifecycle.lifecycleScope.launch {
+            val result = oauthManager.exchangeCode(data, GOOGLE_CLIENT_ID)
+            if (result != null) {
+                viewModel.saveAuthToken(result.accessToken, result.email ?: "")
+                Log.i(TAG, "OAuth success — email=${result.email}")
+            } else {
+                Log.w(TAG, "OAuth token exchange failed or cancelled")
             }
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun StatusScreenPreview() {
-    AlbionDataClientTheme {
-        StatusScreen(captureRunning = false)
     }
 }

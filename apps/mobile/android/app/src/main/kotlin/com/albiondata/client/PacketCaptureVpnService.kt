@@ -24,6 +24,15 @@ class PacketCaptureVpnService : VpnService() {
 
         const val ACTION_START = "com.albiondata.client.VPN_START"
         const val ACTION_STOP = "com.albiondata.client.VPN_STOP"
+
+        // Broadcast actions emitted by the service to update the UI.
+        const val ACTION_PACKET_COUNT = "com.albiondata.client.PACKET_COUNT"
+        const val ACTION_UPLOAD_STATUS = "com.albiondata.client.UPLOAD_STATUS"
+        const val ACTION_AUTH_EXPIRED = "com.albiondata.client.AUTH_EXPIRED"
+
+        const val EXTRA_PACKET_COUNT = "packet_count"
+        const val EXTRA_UPLOAD_STATUS = "upload_status"
+
         const val EXTRA_INGEST_URL = "com.albiondata.client.INGEST_URL"
         const val EXTRA_AUTH_TOKEN = "com.albiondata.client.AUTH_TOKEN"
 
@@ -138,6 +147,7 @@ class PacketCaptureVpnService : VpnService() {
         val stream = FileInputStream(iface.fileDescriptor)
         val buffer = ByteBuffer.allocate(BUFFER_SIZE)
         var packetCount = 0L
+        var lastBroadcast = 0L
 
         Log.i(TAG, "Packet capture loop started")
 
@@ -153,13 +163,30 @@ class PacketCaptureVpnService : VpnService() {
             if (length > 0) {
                 packetCount++
                 Log.d(TAG, "Packet #$packetCount: $length bytes")
+
                 // Forward the raw IPv4 packet to the Go data pipeline for
                 // Photon parsing and HTTP upload.
                 collector?.feedPacket(buffer.array().copyOf(length))
+
+                // Broadcast count every 100 packets to reduce IPC overhead.
+                if (packetCount - lastBroadcast >= 100) {
+                    lastBroadcast = packetCount
+                    sendLocalBroadcast(ACTION_PACKET_COUNT) {
+                        putExtra(EXTRA_PACKET_COUNT, packetCount)
+                    }
+                }
             }
         }
 
         Log.i(TAG, "Packet capture loop stopped. Total packets: $packetCount")
+        sendLocalBroadcast(ACTION_PACKET_COUNT) { putExtra(EXTRA_PACKET_COUNT, packetCount) }
+    }
+
+    private fun sendLocalBroadcast(action: String, extras: Intent.() -> Unit = {}) {
+        sendBroadcast(Intent(action).apply {
+            `package` = packageName
+            extras()
+        })
     }
 
     private fun stopCapture() {
