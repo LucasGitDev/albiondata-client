@@ -11,7 +11,7 @@ git.sr.ht/~jackmordaunt/go-toast/v2/internal/winrt/data/xml/dom
 git.sr.ht/~jackmordaunt/go-toast/v2/internal/winrt/ui/notifications
 git.sr.ht/~jackmordaunt/go-toast/v2/tmpl
 git.sr.ht/~jackmordaunt/go-toast/v2/wintoast
-# github.com/ao-data/albiondata-collector v0.0.0 => ./collector
+# github.com/ao-data/albiondata-collector v0.0.0 => ../../libs/collector
 ## explicit; go 1.25.0
 github.com/ao-data/albiondata-collector
 # github.com/ao-data/go-githubupdate v0.0.0-20260201170319-c56c2e714903
@@ -380,4 +380,4 @@ golang.org/x/text/unicode/norm
 # gopkg.in/toast.v1 v1.0.0-20180812000517-0a84660828b2
 ## explicit
 gopkg.in/toast.v1
-# github.com/ao-data/albiondata-collector => ./collector
+# github.com/ao-data/albiondata-collector => ../../libs/collector

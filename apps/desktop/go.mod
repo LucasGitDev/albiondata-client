@@ -90,4 +90,4 @@ require (
 
 require github.com/ao-data/albiondata-collector v0.0.0
 
-replace github.com/ao-data/albiondata-collector => ./collector
+replace github.com/ao-data/albiondata-collector => ../../libs/collector

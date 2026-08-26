@@ -22,11 +22,12 @@ jobs:
     - name: Install system deps
       run: sudo apt-get update && sudo apt-get install -y libpcap-dev
     - name: Build frontend (required for go:embed)
-      run: cd frontend && npm ci --silent && npm run build
+      run: cd apps/desktop/frontend && npm ci --silent && npm run build
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
         version: v2.13.1
+        working-directory: apps/desktop
     - name: Run quality gate
       run: make check
 
@@ -40,6 +41,12 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version: '1.27'
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    - name: Build frontend
+      run: cd apps/desktop/frontend && npm ci --silent && npm run build
     - name: Build
       run: make build-linux
 
@@ -65,9 +72,14 @@ jobs:
       uses: actions/setup-go@v6
       with:
         go-version: '1.27'
-
-    - name: install nsis
-      run: sudo apt-get update; sudo apt-get -y install nsis
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    - name: Build frontend
+      run: cd apps/desktop/frontend && npm ci --silent && npm run build
+    - name: install nsis and cross-compile deps
+      run: sudo apt-get update; sudo apt-get -y install nsis mingw-w64
 
     - name: Make
       run: make build-windows
@@ -102,17 +114,20 @@ jobs:
       with:
         go-version: '1.27'
 
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    - name: Build frontend
+      run: cd apps/desktop/frontend && npm ci --silent && npm run build
     - name: Build
-      run: CGO_ENABLED=1 GOARCH=amd64 CC="clang -arch x86_64" CGO_LDFLAGS="-arch x86_64" go build -ldflags "-s -w -X main.version=$GITHUB_REF_NAME" albiondata-client.go
+      run: cd apps/desktop && CGO_ENABLED=1 GOARCH=amd64 CC="clang -arch x86_64" CGO_LDFLAGS="-arch x86_64" go build -ldflags "-s -w -X main.version=$GITHUB_REF_NAME" .
 
     - name: ls
-      run: ls -la
+      run: ls -la apps/desktop/
 
     - name: gzip
-      run: gzip -k9 albiondata-client
-
-    - name: mv
-      run: mv albiondata-client.gz update-darwin-amd64.gz
+      run: gzip -k9 apps/desktop/albiondata-client && mv apps/desktop/albiondata-client.gz update-darwin-amd64.gz
 
     - name: package
       run: |
@@ -122,7 +137,7 @@ jobs:
         rm -rfv ./$ZIPNAME
         rm -rfv ./scripts/update-darwin-amd64.zip
         mkdir -v ./scripts/$TEMP
-        cp -v albiondata-client ./scripts/$TEMP/albiondata-client-executable
+        cp -v apps/desktop/albiondata-client ./scripts/$TEMP/albiondata-client-executable
         cd scripts
         cp -v run.command ./$TEMP/run.command
         # chown -Rv ${USER}:${USER} ./$TEMP

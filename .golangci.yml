@@ -11,11 +11,11 @@ linters:
     # These packages are protected (do not modify without explicit task scope).
     # Violations will be addressed in dedicated refactor tasks.
     rules:
-      - path: "^client/"
+      - path: "^(apps/desktop/)?client/"
         linters: [errcheck, staticcheck, unused]
-      - path: "^lib/"
+      - path: "^(apps/desktop/)?lib/"
         linters: [errcheck, staticcheck, unused]
-      - path: "^auth/"
+      - path: "^(apps/desktop/)?auth/"
         linters: [errcheck, staticcheck]
       # ioutil deprecation is style, not a bug
       - linters: [staticcheck]

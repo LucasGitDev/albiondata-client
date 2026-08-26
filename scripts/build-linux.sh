@@ -2,14 +2,15 @@
 
 set -eo pipefail
 
-sudo apt-get update && sudo apt-get install -y libpcap-dev patchelf
+sudo apt-get update && sudo apt-get install -y \
+  libpcap-dev patchelf \
+  libgtk-3-dev libwebkit2gtk-4.1-dev
 
 env | sort
 
-go build -ldflags "-s -w -X main.version=$GITHUB_REF_NAME" albiondata-client.go
-patchelf --replace-needed libpcap.so.0.8 libpcap.so albiondata-client
+cd apps/desktop && go build -ldflags "-s -w -X main.version=$GITHUB_REF_NAME" -o ../../albiondata-client . && cd ../..
 
-./albiondata-client -version
+patchelf --replace-needed libpcap.so.0.8 libpcap.so albiondata-client
 
 cp albiondata-client albiondata-client.old
 gzip -9 albiondata-client

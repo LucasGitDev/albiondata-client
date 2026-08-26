@@ -13,6 +13,9 @@ config.yaml
 .DS_Store
 frontend/node_modules/
 frontend/dist/
+apps/desktop/frontend/node_modules/
+apps/desktop/frontend/dist/
+apps/desktop/bin/
 act.sh
 albiondata-client*
 buildall.sh
