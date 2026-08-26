@@ -7,14 +7,20 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"log"
+)
+
+const (
+	powMaxRetries  = 3
+	powRetryBaseMs = 1000 // delays between retries: 1s, 2s
 )
 
 type httpUploaderPow struct {
@@ -48,7 +54,7 @@ func newHTTPUploaderPow(url string) uploader {
 	}
 }
 
-func (u *httpUploaderPow) getPow(target interface{}) {
+func (u *httpUploaderPow) getPow(target interface{}) error {
 	log.Printf("GETTING POW")
 	fullURL := u.baseURL + "/pow"
 
@@ -58,26 +64,24 @@ func (u *httpUploaderPow) getPow(target interface{}) {
 	resp, err := client.Do(req)
 
 	if err != nil {
-		log.Printf("Error in Pow Get request: %v", err)
-		return
+		return fmt.Errorf("pow GET failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
-		log.Printf("Got bad response code: %v", resp.StatusCode)
-		return
+		return fmt.Errorf("pow GET bad status: %v", resp.StatusCode)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
-		log.Printf("Error in parsing Pow Get request: %v", err)
+		return fmt.Errorf("pow GET decode failed: %w", err)
 	}
+	return nil
 }
 
 // Proves to the server that a pow was solved by submitting
 // the pow's key, the solution and a nats msg as a POST request
 // the topic becomes part of the URL
-func (u *httpUploaderPow) uploadWithPow(pow Pow, solution string, natsmsg []byte, topic string, serverid int, identifier string) {
-
+func (u *httpUploaderPow) uploadWithPow(pow Pow, solution string, natsmsg []byte, topic string, serverid int, identifier string) error {
 	fullURL := u.baseURL + "/pow/" + topic
 
 	client := &http.Client{}
@@ -93,22 +97,17 @@ func (u *httpUploaderPow) uploadWithPow(pow Pow, solution string, natsmsg []byte
 	resp, err := client.Do(req)
 
 	if err != nil {
-		log.Printf("Error while proving pow: %v", err)
-		return
+		return fmt.Errorf("pow POST failed: %w", err)
 	}
-
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
-		body, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("HTTP Error while proving pow. returned: %v (%v)", resp.StatusCode, string(body))
-		return
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("pow POST bad status %v: %s", resp.StatusCode, string(body))
 	}
 
 	log.Printf("Successfully sent ingest request to %v", u.baseURL)
+	return nil
 }
 
 // Generates a random hex string e.g.: faa2743d9181dca5
@@ -170,8 +169,25 @@ func solvePow(pow Pow) string {
 }
 
 func (u *httpUploaderPow) sendToIngest(body []byte, topic string, state *albionState, identifier string) {
-	pow := Pow{}
-	u.getPow(&pow)
-	solution := solvePow(pow)
-	u.uploadWithPow(pow, solution, body, topic, state.AODataServerID, identifier)
+	var lastErr error
+	for attempt := 1; attempt <= powMaxRetries; attempt++ {
+		pow := Pow{}
+		if err := u.getPow(&pow); err != nil {
+			lastErr = err
+			log.Printf("POW: attempt %d/%d — getPow failed: %v", attempt, powMaxRetries, err)
+		} else {
+			solution := solvePow(pow)
+			if err := u.uploadWithPow(pow, solution, body, topic, state.AODataServerID, identifier); err != nil {
+				lastErr = err
+				log.Printf("POW: attempt %d/%d — upload failed: %v", attempt, powMaxRetries, err)
+			} else {
+				return // success
+			}
+		}
+		if attempt < powMaxRetries {
+			backoff := time.Duration(powRetryBaseMs<<uint(attempt-1)) * time.Millisecond
+			time.Sleep(backoff)
+		}
+	}
+	log.Printf("POW: all %d attempts failed, last error: %v", powMaxRetries, lastErr)
 }

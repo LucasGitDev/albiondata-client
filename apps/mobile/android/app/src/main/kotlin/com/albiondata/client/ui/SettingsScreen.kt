@@ -18,7 +18,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +39,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.albiondata.client.data.AppSettings
+import com.albiondata.client.data.Realm
 import com.albiondata.client.ui.theme.AlbionDataClientTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,6 +48,7 @@ fun SettingsScreen(
     settings: AppSettings,
     onBack: () -> Unit = {},
     onPrivateModeToggle: (Boolean) -> Unit = {},
+    onRealmSelect: (Realm) -> Unit = {},
     onIngestUrlSave: (String) -> Unit = {},
     onLoginClick: () -> Unit = {},
     onLogoutClick: () -> Unit = {},
@@ -112,40 +114,66 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Ingest URL card ──────────────────────────────────────────────
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Ingest URL", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = urlDraft,
-                        onValueChange = { urlDraft = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("URL") },
-                        singleLine = true,
-                        enabled = settings.privateMode,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    )
-                    if (!settings.privateMode) {
+            // ── Realm selector (public mode only) ────────────────────────────
+            if (!settings.privateMode) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Game server region", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Switch to private mode to customise the ingest URL.",
+                            "Select the region that matches your Albion Online server.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Realm.entries.forEach { realm ->
+                                FilterChip(
+                                    selected = settings.realm == realm,
+                                    onClick = { onRealmSelect(realm) },
+                                    label = { Text(realm.label) },
+                                )
+                            }
+                        }
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Button(
-                        onClick = { onIngestUrlSave(urlDraft) },
-                        enabled = settings.privateMode && urlDraft.isNotBlank() && urlDraft != settings.ingestUrl,
-                        modifier = Modifier.align(Alignment.End),
-                    ) {
-                        Text("Save URL")
+                }
+            }
+
+            // ── Ingest URL card (private mode only) ─────────────────────────
+            if (settings.privateMode) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Ingest URL", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = urlDraft,
+                            onValueChange = { urlDraft = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("URL") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = { onIngestUrlSave(urlDraft) },
+                            enabled = urlDraft.isNotBlank() && urlDraft != settings.ingestUrl,
+                            modifier = Modifier.align(Alignment.End),
+                        ) {
+                            Text("Save URL")
+                        }
                     }
                 }
             }
@@ -203,6 +231,14 @@ fun SettingsScreen(
 private fun SettingsPublicPreview() {
     AlbionDataClientTheme {
         SettingsScreen(settings = AppSettings(privateMode = false))
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun SettingsPublicEastPreview() {
+    AlbionDataClientTheme {
+        SettingsScreen(settings = AppSettings(privateMode = false, realm = Realm.EAST))
     }
 }
 

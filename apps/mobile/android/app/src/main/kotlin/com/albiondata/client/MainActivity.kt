@@ -123,6 +123,7 @@ class MainActivity : ComponentActivity() {
                             onPrivateModeToggle = { enabled ->
                                 viewModel.setPrivateMode(enabled)
                             },
+                            onRealmSelect = { realm -> viewModel.setRealm(realm) },
                             onIngestUrlSave = { url -> viewModel.setIngestUrl(url) },
                             onLoginClick = { startOAuthFlow() },
                             onLogoutClick = {
@@ -153,8 +154,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchVpnService() {
+        val settings = viewModel.uiState.value.settings
         val intent = Intent(this, PacketCaptureVpnService::class.java).apply {
             action = PacketCaptureVpnService.ACTION_START
+            putExtra(PacketCaptureVpnService.EXTRA_INGEST_URL, settings.ingestUrl)
+            settings.authToken?.let { putExtra(PacketCaptureVpnService.EXTRA_AUTH_TOKEN, it) }
         }
         startForegroundService(intent)
         viewModel.setCaptureRunning(true)
