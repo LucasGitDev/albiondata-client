@@ -46,8 +46,10 @@ fun LogsScreen(
 ) {
     val listState = rememberLazyListState()
 
-    // Auto-scroll to bottom when new log entries arrive
-    LaunchedEffect(logs.size) {
+    // Auto-scroll to bottom when new log entries arrive.
+    // Use lastOrNull()?.id so scroll triggers even when list is at max capacity
+    // and size stays constant (oldest entry dropped, new one added).
+    LaunchedEffect(logs.lastOrNull()?.id) {
         if (logs.isNotEmpty()) {
             listState.animateScrollToItem(logs.size - 1)
         }

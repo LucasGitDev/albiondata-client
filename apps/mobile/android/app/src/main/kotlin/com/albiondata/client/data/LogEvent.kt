@@ -13,7 +13,11 @@ data class LogEvent(
     val message: String,
 ) {
     val formattedTime: String
-        get() = DateTimeFormatter.ofPattern("HH:mm:ss")
+        get() = TIME_FMT.format(Instant.ofEpochMilli(timestampMs))
+
+    companion object {
+        private val TIME_FMT: DateTimeFormatter = DateTimeFormatter
+            .ofPattern("HH:mm:ss")
             .withZone(ZoneId.systemDefault())
-            .format(Instant.ofEpochMilli(timestampMs))
+    }
 }

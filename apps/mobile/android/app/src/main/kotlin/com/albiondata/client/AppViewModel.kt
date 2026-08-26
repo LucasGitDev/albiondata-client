@@ -13,6 +13,7 @@ import com.albiondata.client.data.AppSettings
 import com.albiondata.client.data.LogEvent
 import com.albiondata.client.data.LogEventType
 import com.albiondata.client.data.SettingsRepository
+import java.util.ArrayDeque
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +36,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repo = SettingsRepository(application)
     private var logIdCounter = 0L
+    // Circular buffer: O(1) append at capacity vs repeated drop(1) list copies
+    private val logBuffer = ArrayDeque<LogEvent>(MAX_LOG_ENTRIES)
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
@@ -97,17 +100,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun appendLog(event: LogEvent) {
-        _uiState.update { state ->
-            val updated = if (state.logEvents.size >= MAX_LOG_ENTRIES) {
-                state.logEvents.drop(1) + event
-            } else {
-                state.logEvents + event
-            }
-            state.copy(logEvents = updated)
-        }
+        if (logBuffer.size >= MAX_LOG_ENTRIES) logBuffer.pollFirst()
+        logBuffer.addLast(event)
+        _uiState.update { it.copy(logEvents = logBuffer.toList()) }
     }
 
     fun clearLogs() {
+        logBuffer.clear()
         _uiState.update { it.copy(logEvents = emptyList()) }
     }
 
