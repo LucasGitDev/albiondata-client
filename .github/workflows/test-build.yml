@@ -28,6 +28,8 @@ jobs:
       with:
         version: v2.13.1
         working-directory: apps/desktop
+      env:
+        GOWORK: "off"
     - name: Run quality gate
       run: make check
 
