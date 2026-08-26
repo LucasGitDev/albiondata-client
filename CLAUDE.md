@@ -81,6 +81,8 @@ A task is Done only when ALL of the following pass, in order:
 5. **Branch merged to master via PR**
 6. **Quality gate passes on master after merge** — `make check` exits 0 on master;
    only then mark task Done in backlog
+7. **Branch cleanup** — after merge, delete the local task branch: `git branch -d task/<id>-slug`
+   (use `-D` only if the branch was closed without merging to master)
 
 ## Quality gate
 
