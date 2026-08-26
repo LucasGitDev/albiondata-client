@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">Albion Data Client</string>
+    <string name="vpn_notification_title">Albion Data Client</string>
+    <string name="vpn_notification_text">Capturing network packets…</string>
+    <string name="vpn_stop_action">Stop</string>
+    <string name="vpn_channel_name">Packet Capture</string>
+    <string name="vpn_channel_description">Shows VPN packet capture status</string>
+    <string name="start_capture">Start Capture</string>
+    <string name="stop_capture">Stop Capture</string>
 </resources>
