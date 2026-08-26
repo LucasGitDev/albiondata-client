@@ -161,18 +161,43 @@ const allImplResults = []
 const allReviewResults = []
 const allMergedTaskIds = []
 const allFinalizedTaskIds = []
-const seenTaskIds = new Set()
+// claimedTaskIds: tasks we STARTED (spike claimed or impl worktree created).
+// Only these are skipped in future iterations. Tasks that are just blocked/in-review
+// are re-evaluated every iteration so newly unblocked deps are picked up.
+const claimedTaskIds = new Set()
 const fixAttempts = {}  // task_id → number of fix attempts made
 
 // ─── Main loop ──────────────────────────────────────────────────────────────
-// Runs until: nothing eligible AND nothing in-review (everything blocked or done)
+// Stops when 2 consecutive iterations produce zero progress (no new claims, no merges).
 
 let iteration = 0
-const MAX_ITERATIONS = 6
+let consecutiveNoProgress = 0
+const MAX_ITERATIONS = 12
 
-while (iteration < MAX_ITERATIONS) {
+// ── Pre-loop: orphan worktree cleanup ─────────────────────────────────────────
+// Clean up any worktrees left over from previous orchestrator runs (tasks now Done or merged).
+await agent(
+  `Clean up orphaned git worktrees from previous runs.
+
+Main repo: ${ROOT}
+
+Steps:
+1. List all worktrees: \`git -C ${ROOT} worktree list --porcelain\`
+2. List Done tasks: \`backlog task list --plain | grep Done\`
+3. List merged PRs: \`gh pr list --state merged --json headRefName --jq '.[].headRefName'\`
+4. For each worktree whose branch is either: (a) merged, or (b) belongs to a Done task:
+   \`git -C ${ROOT} worktree remove <path> --force 2>/dev/null || true\`
+   \`git -C ${ROOT} branch -D <branch> 2>/dev/null || true\`
+5. Prune stale metadata: \`git -C ${ROOT} worktree prune\`
+6. Report: how many removed, which ones remain.
+
+Do NOT remove the main worktree at ${ROOT}.`,
+  { label: 'orphan-cleanup', phase: 'Scan', agentType: 'general-purpose' }
+)
+
+while (iteration < MAX_ITERATIONS && consecutiveNoProgress < 2) {
   iteration++
-  log(`=== Iteration ${iteration} ===`)
+  log(`=== Iteration ${iteration} (no-progress streak: ${consecutiveNoProgress}) ===`)
 
   // ── Phase: Scan ────────────────────────────────────────────────────────────
 
@@ -212,26 +237,22 @@ Return structured JSON.`,
     log(`Blocked: ${scan.blocked_tasks.map(t => `${t.id}←${t.blocked_by}`).join(', ')}`)
   }
 
-  // Stop condition: nothing to do this iteration
+  // Hard stop: board empty
   const hasWork = scan.eligible_spikes.length > 0 || scan.eligible_tasks.length > 0 || scan.in_review_tasks.length > 0
   if (!hasWork) {
-    log('Nothing eligible or in-review. Board is blocked or complete.')
+    log('Nothing eligible or in-review. Board complete or fully blocked.')
     break
   }
 
-  // Prevent re-running already-started tasks
-  const freshSpikes = scan.eligible_spikes.filter(s => !seenTaskIds.has(s.id))
-  const freshTasks = scan.eligible_tasks.filter(t => !seenTaskIds.has(t.id))
-  const freshInReview = scan.in_review_tasks.filter(t => !seenTaskIds.has(t.id))
+  // Filter: only skip tasks we've already CLAIMED (worktree created / spike started).
+  // In-review tasks are always re-evaluated — CI may have changed or a fix was pushed.
+  // Blocked-but-not-claimed tasks are re-scanned every iteration (deps may have merged).
+  const freshSpikes = scan.eligible_spikes.filter(s => !claimedTaskIds.has(s.id))
+  const freshTasks  = scan.eligible_tasks.filter(t => !claimedTaskIds.has(t.id))
+  // in_review: always process all; reviewed set below deduplicates within this iteration
+  const inReviewTasks = scan.in_review_tasks
 
-  freshSpikes.forEach(s => seenTaskIds.add(s.id))
-  freshTasks.forEach(t => seenTaskIds.add(t.id))
-  freshInReview.forEach(t => seenTaskIds.add(t.id))
-
-  if (freshSpikes.length === 0 && freshTasks.length === 0 && freshInReview.length === 0) {
-    log('No new work this iteration — waiting for external state change (merges). Stopping.')
-    break
-  }
+  const iterationMergedCount_before = allMergedTaskIds.length
 
   // ── Phase: PO (product questions on spikes) ────────────────────────────────
 
@@ -296,6 +317,7 @@ Return structured result.`,
 
     iterSpikeResults = (await parallel(
       freshSpikes.map(spike => async () => {
+        claimedTaskIds.add(spike.id)
         await agent(
           `Run: cd ${ROOT} && backlog task edit ${spike.id} --status "In Progress"`,
           { label: `claim:${spike.id}`, phase: 'Spikes', agentType: 'general-purpose' }
@@ -380,6 +402,7 @@ Return groups as arrays of task IDs.`,
           const branch = branchName(task.id, task.title)
           const worktree = worktreePath(task.id)
 
+          claimedTaskIds.add(task.id)
           await agent(
             `Run: cd ${ROOT} && backlog task edit ${task.id} --status "In Progress"`,
             { label: `claim:${task.id}`, phase: 'Implement', agentType: 'general-purpose' }
@@ -431,11 +454,16 @@ Return structured result.`,
     log(`Implement: ${iterImplResults.filter(r => r.status === 'in_review').length} in review, ${iterImplResults.filter(r => r.status !== 'in_review').length} blocked`)
   }
 
-  // ── Phase: Review (includes pre-existing in-review tasks) ─────────────────
+  // ── Phase: Review (all in-review tasks + newly implemented) ─────────────────
+  // in-review tasks are always re-evaluated (CI might have changed, fix might have been pushed).
+  // Dedup by task_id so a task just moved to in_review by impl doesn't get double-reviewed.
 
+  const reviewedThisIteration = new Set()
   const toReview = [
     ...iterImplResults.filter(r => r.status === 'in_review' && r.pr_url),
-    ...freshInReview.map(t => ({ task_id: t.id, pr_url: t.pr_url, pr_number: t.pr_number, needs_security_audit: t.needs_security_audit })),
+    ...inReviewTasks
+      .filter(t => !iterImplResults.some(r => r.task_id === t.id))  // don't double-review
+      .map(t => ({ task_id: t.id, pr_url: t.pr_url, pr_number: t.pr_number, needs_security_audit: t.needs_security_audit })),
   ]
 
   if (toReview.length > 0) {
@@ -572,7 +600,7 @@ Return: { task_id: "${r.task_id}", fixed: true/false, blocker: "reason if not fi
 
           if (fixResult && fixResult.fixed) {
             // Re-add to seen so review runs again next iteration
-            seenTaskIds.delete(r.task_id)
+            claimedTaskIds.delete(r.task_id)
             // Remove stale review result so fresh review runs
             const idx = allReviewResults.findIndex(x => x.task_id === r.task_id)
             if (idx !== -1) allReviewResults.splice(idx, 1)
@@ -586,7 +614,23 @@ Return: { task_id: "${r.task_id}", fixed: true/false, blocker: "reason if not fi
 
     const exhausted = reviewBlocked.filter(r => (fixAttempts[r.task_id] || 0) >= 2)
     if (exhausted.length > 0) {
-      log(`Exhausted fix attempts (2/2): ${exhausted.map(r => r.task_id).join(', ')} — moved to To Do`)
+      log(`Exhausted fix attempts (2/2): ${exhausted.map(r => r.task_id).join(', ')} — closing PRs and cleaning worktrees`)
+      await agent(
+        `Close abandoned PRs and clean worktrees for tasks that exhausted fix attempts.
+
+Tasks: ${exhausted.map(r => r.task_id).join(', ')}
+Main repo: ${ROOT}
+
+For each task:
+1. Find open PR: \`gh pr list --search "<task_id>" --json number,state --jq '.[0]'\`
+2. Close PR with comment: \`gh pr close <number> --comment "Closing: exhausted 2 fix attempts. Task moved back to To Do for manual review."\`
+3. Move task to To Do: \`backlog task edit <task_id> --status "To Do" --notes "Abandoned: PR closed after 2 failed fix attempts."\`
+4. Remove worktree: \`git -C ${ROOT} worktree remove ${ROOT}/../albiondata-client-task-<task-id-lowercase> --force 2>/dev/null || true\`
+5. Delete local branch: \`git -C ${ROOT} branch -D <branch> 2>/dev/null || true\`
+
+Run: \`git -C ${ROOT} worktree prune\``,
+        { label: `abandon-cleanup:${iteration}`, phase: 'Fix', agentType: 'general-purpose' }
+      )
     }
   }
 
@@ -648,7 +692,7 @@ Return: { task_id: "${r.task_id}", merged: true/false, make_check_passed: true/f
           // Remove from allReviewResults so fixer + re-review runs next iteration
           const idx = allReviewResults.findIndex(x => x.task_id === r.task_id)
           if (idx !== -1) allReviewResults.splice(idx, 1)
-          seenTaskIds.delete(r.task_id)
+          claimedTaskIds.delete(r.task_id)
         } else {
           log(`CI still failing after 2 fix attempts on ${r.task_id} — moving to To Do`)
           await agent(
@@ -730,8 +774,18 @@ Do not remove the main worktree (${ROOT} itself).`,
     }
   }
 
-  // Continue loop — next iteration picks up newly unblocked tasks
-  log(`Iteration ${iteration} complete. Continuing to check for newly eligible tasks...`)
+  // ── Progress tracking ─────────────────────────────────────────────────────
+  const mergedThisIteration = allMergedTaskIds.length - iterationMergedCount_before
+  const claimedThisIteration = freshSpikes.length + freshTasks.length
+  const madeProgress = claimedThisIteration > 0 || mergedThisIteration > 0
+
+  if (madeProgress) {
+    consecutiveNoProgress = 0
+    log(`Iteration ${iteration} complete — claimed: ${claimedThisIteration}, merged: ${mergedThisIteration}. Continuing...`)
+  } else {
+    consecutiveNoProgress++
+    log(`Iteration ${iteration} complete — no new claims or merges (streak: ${consecutiveNoProgress}/2). ${consecutiveNoProgress < 2 ? 'Re-scanning in case CI finished...' : 'Stopping.'}`)
+  }
 }
 
 // ─── Summary ────────────────────────────────────────────────────────────────
