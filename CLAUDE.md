@@ -121,6 +121,11 @@ Backlog.md is the canonical documentation system. Do NOT create standalone markd
 - CLAUDE.md sole exception: harness instructions only, not project docs
 - **CLI gap exception**: `backlog decision create` and `backlog doc create` have no update command — after creation, write content directly to the returned file path (this is the only permitted direct edit of backlog files)
 
+**Knowledge index** (use these before asking questions about the project):
+`backlog doc list` and `backlog decision list` are canonical.
+Key docs: doc-1 (harness design), doc-2 (CI quality gate), doc-3 (agent models), doc-8 (Wails integration), doc-9 (BPF/pcap permissions), doc-10 (OAuth PKCE flow).
+Key decisions: decision-5 (harness pattern), decision-6 (Wails v2), decision-7 (CLI/systray gate), decision-8 (OAuth creds via ldflags), decision-9 (StopCapture no-op), decision-10 (token persistence).
+
 ## Architecture decisions
 
 Record any relevant decision made during work:
