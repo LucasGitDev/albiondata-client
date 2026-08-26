@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ao-data/albiondata-collector/pipeline"
 	"github.com/ao-data/albiondata-client/log"
 )
 
@@ -28,7 +29,8 @@ func (client *Client) Run() error {
 	ConfigGlobal.setupDebugEvents()
 	ConfigGlobal.setupDebugOperations()
 
-	createDispatcher()
+	// Propagate desktop config into the shared pipeline config.
+	syncPipelineConfig()
 
 	if ConfigGlobal.Offline {
 		processOffline(ConfigGlobal.OfflinePath)
@@ -42,4 +44,25 @@ func (client *Client) Run() error {
 		return apw.run()
 	}
 	return nil
+}
+
+// syncPipelineConfig copies the desktop ConfigGlobal fields into the pipeline
+// package's ConfigGlobal so the shared parser/uploader code uses the same values.
+func syncPipelineConfig() {
+	pipeline.ConfigGlobal.PublicIngestBaseUrls = ConfigGlobal.PublicIngestBaseUrls
+	pipeline.ConfigGlobal.PrivateIngestBaseUrls = ConfigGlobal.PrivateIngestBaseUrls
+	pipeline.ConfigGlobal.DisableUpload = ConfigGlobal.DisableUpload
+	pipeline.ConfigGlobal.EnableWebsockets = ConfigGlobal.EnableWebsockets
+	pipeline.ConfigGlobal.AllowedWSHosts = ConfigGlobal.AllowedWSHosts
+	pipeline.ConfigGlobal.RecordPath = ConfigGlobal.RecordPath
+	pipeline.ConfigGlobal.NoCPULimit = ConfigGlobal.NoCPULimit
+	pipeline.ConfigGlobal.Debug = ConfigGlobal.Debug
+	pipeline.ConfigGlobal.Version = version
+	pipeline.ConfigGlobal.DebugOperations = ConfigGlobal.DebugOperations
+	pipeline.ConfigGlobal.DebugOperationsString = ConfigGlobal.DebugOperationsString
+	pipeline.ConfigGlobal.DebugEvents = ConfigGlobal.DebugEvents
+	pipeline.ConfigGlobal.DebugEventsString = ConfigGlobal.DebugEventsString
+	pipeline.ConfigGlobal.DebugIgnoreDecodingErrors = ConfigGlobal.DebugIgnoreDecodingErrors
+	pipeline.PrivateAuthToken = PrivateAuthToken
+	pipeline.OnAuthExpired = OnAuthExpired
 }

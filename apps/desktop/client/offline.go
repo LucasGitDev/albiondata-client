@@ -4,24 +4,23 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ao-data/albiondata-collector/pipeline"
 	"github.com/ao-data/albiondata-client/log"
 )
 
 func processOffline(path string) {
 	log.Infof("Beginning offline process with %v", path)
 
-	r := newRouter()
-	go r.run()
+	handler := pipeline.NewHandler()
+	handler.Start()
 
 	_, err := os.Stat(path)
-
 	if err != nil {
 		log.Error("Could not find {}: ", path, err)
-
 		return
 	}
 
-	l := newListener(r)
+	l := newListener(handler)
 
 	fileExtension := filepath.Ext(path)
 	if fileExtension == ".pcap" {
