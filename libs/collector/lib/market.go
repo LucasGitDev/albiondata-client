@@ -38,7 +38,7 @@ type MarketNotificationType string
 
 const (
 	SalesNotification  MarketNotificationType = "SalesNotification"
-	ExpiryNotification                        = "ExpiryNotification"
+	ExpiryNotification MarketNotificationType = "ExpiryNotification"
 )
 
 type MarketNotification interface {

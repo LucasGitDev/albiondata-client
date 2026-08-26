@@ -75,7 +75,7 @@ func sendMsgToPublicUploaders(upload interface{}, topic string, state *albionSta
 	// http+pow://albion-online-data.com is used as a magic placeholder for every realm there is
 	if strings.Contains(ConfigGlobal.PublicIngestBaseUrls, "https+pow://albion-online-data.com") {
 		// we replace the placeholder with the correct one based on the serverID from albionState
-		PublicIngestBaseUrls = strings.Replace(PublicIngestBaseUrls, "https+pow://albion-online-data.com", state.AODataIngestBaseURL, -1)
+		PublicIngestBaseUrls = strings.ReplaceAll(PublicIngestBaseUrls, "https+pow://albion-online-data.com", state.AODataIngestBaseURL)
 	}
 
 	var publicUploaders = createUploaders(strings.Split(PublicIngestBaseUrls, ","))
@@ -149,7 +149,6 @@ func runHTTPServer() {
 func sendMsgToWebSockets(msg []byte, topic string) {
 	// TODO (gradius): send JSON data with topic string
 	// TODO (gradius): this seems super hacky, and I'm sure there's a better way.
-	var result string
-	result = "{\"topic\": \"" + topic + "\", \"data\": " + string(msg) + "}"
+	result := "{\"topic\": \"" + topic + "\", \"data\": " + string(msg) + "}"
 	wsHub.broadcast <- []byte(result)
 }
