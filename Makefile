@@ -53,6 +53,9 @@ generate:
 	wails generate module
 	@echo "Bindings regenerated. Commit frontend/wailsjs/ if app.go changed."
 
+dev-setup:
+	scripts/setup-android-dev.sh
+
 # ── Help ─────────────────────────────────────────────────────────────────────
 
 help:
@@ -61,6 +64,7 @@ help:
 	@echo "  make doctor-android  Check dev environment (desktop + Android)"
 	@echo "  make setup           Install missing desktop tools"
 	@echo "  make setup-android   Install missing desktop + Android tools"
+	@echo "  make dev-setup       Install Android dev environment"
 	@echo "  make check           Run quality gate (lint, typecheck, build)"
 	@echo "  make run             Run app in dev mode"
 	@echo "  make fmt             Format Go + frontend code"
