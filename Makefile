@@ -53,6 +53,7 @@ generate:
 	wails generate module
 	@echo "Bindings regenerated. Commit frontend/wailsjs/ if app.go changed."
 
+## dev-setup: install Android dev environment (idempotent, macOS/Linux only)
 dev-setup:
 	scripts/setup-android-dev.sh
 
@@ -89,4 +90,6 @@ help:
 	@echo "  make fmt             Format Go + frontend code"
 	@echo "  make generate        Regenerate Wails bindings"
 	@echo "  make gomobile-android Build collector.aar for Android"
+	@echo ""
+	@echo "  scripts/run.command  macOS Finder-launchable alias for run.sh (double-click to run app)"
 	@echo ""
