@@ -100,13 +100,34 @@ Cross-platform full build (win + linux + darwin) is a release-time gate, not per
 unless the active task explicitly requires it.
 If a task touches core, flag it in the task's implementation notes before changing code.
 
+## Documentation standard
+
+Backlog.md is the canonical documentation system. Do NOT create standalone markdown files.
+
+| What to document | Command |
+|-----------------|---------|
+| Architecture decision (any scope) | `backlog decision create "title" -s accepted` |
+| Technical guide or runbook | `backlog doc create "title" -t guide` |
+| Feature/API specification | `backlog doc create "title" -t specification` |
+| Platform setup or README-style doc | `backlog doc create "title" -t readme` |
+| Implementation notes for a task | `backlog task edit TASK-X --append-notes "..."` |
+| Final task summary | `backlog task edit TASK-X --final-summary "..."` |
+
+**Rules:**
+- Non-obvious architectural choice → `backlog decision create` BEFORE writing code
+- Platform-specific behavior (Android, iOS, macOS, permissions, VPN) → `backlog doc create -t guide`
+- API or data contract → `backlog doc create -t specification`
+- NEVER create `.md` files in the repo for documentation — use backlog commands
+- CLAUDE.md sole exception: harness instructions only, not project docs
+- **CLI gap exception**: `backlog decision create` and `backlog doc create` have no update command — after creation, write content directly to the returned file path (this is the only permitted direct edit of backlog files)
+
 ## Architecture decisions
 
-Record any relevant decision made during work. Options:
-- Add `## Decision` section to the task's implementation notes
-- Use `backlog decision create "title"` for decisions spanning multiple tasks
+Record any relevant decision made during work:
+- Use `backlog decision create "title" -s accepted` — then write content to returned path
+- Reference the decision ID in task implementation notes
 
-Do not implement silently. If you pick a non-obvious approach, write it down.
+Do not implement silently. If you pick a non-obvious approach, write it down before writing code.
 
 ## Multi-Agent Harness
 
