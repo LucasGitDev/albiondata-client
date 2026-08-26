@@ -7,7 +7,8 @@ set -eo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-FRONTEND="$ROOT/frontend"
+DESKTOP="$ROOT/apps/desktop"
+FRONTEND="$DESKTOP/frontend"
 if [ -d "$FRONTEND" ]; then
   cd "$FRONTEND"
 
@@ -33,33 +34,25 @@ if [ -d "$FRONTEND" ]; then
 fi
 
 echo "=== Go: build ==="
-go build $(go list ./... | grep -v '/frontend/')
+go build ./apps/desktop/... ./libs/collector/...
 
 echo "=== Go: vet ==="
-go vet $(go list ./... | grep -v '/frontend/')
+go vet ./apps/desktop/... ./libs/collector/...
 
 echo "=== Go: test ==="
-go test $(go list ./... | grep -v '/frontend/')
-
-# Test each go.work sub-module that is not the root module.
-if [ -f "$ROOT/go.work" ]; then
-  while IFS= read -r moddir; do
-    [ "$moddir" = "." ] && continue
-    echo "=== Go: test sub-module $moddir ==="
-    (cd "$ROOT/$moddir" && go test ./...)
-  done < <(go work edit -json | grep '"DiskPath"' | awk -F'"' '{print $4}')
-fi
+go test ./apps/desktop/... ./libs/collector/...
 
 if command -v golangci-lint &>/dev/null; then
   echo "=== Go: lint ==="
-  golangci-lint run
+  (cd "$DESKTOP" && golangci-lint run)
+  (cd "$ROOT/libs/collector" && golangci-lint run)
 else
   echo "=== Go: lint (skipped — golangci-lint not installed) ==="
 fi
 
 echo "=== Wails: native build (smoke test) ==="
 if command -v wails &>/dev/null; then
-  wails build
+  (cd "$DESKTOP" && GOWORK=off wails build)
 else
   echo "    wails CLI not found — skipping smoke test"
 fi
