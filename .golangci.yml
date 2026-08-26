@@ -3,26 +3,23 @@ version: "2"
 linters:
   default: none
   enable:
-    - govet       # correctness: misuse of sync, unsafe, printf verbs
-    - staticcheck # correctness subset: SA class (bugs), not style (S/QF)
-    - errcheck    # unchecked errors — new code only (see exclude-rules)
-
-issues:
-  exclude-rules:
-    # Pre-existing unchecked errors in core packet capture code.
-    # These are inherited from the original repo and out of scope until
-    # a dedicated refactor task explicitly addresses them.
-    - path: "^client/"
-      linters: [errcheck, staticcheck, unused]
-    - path: "^lib/"
-      linters: [errcheck, staticcheck, unused]
-    - path: "^auth/"
-      linters: [errcheck, staticcheck]
-
-    # ioutil deprecation is a style issue, not a bug — ignore globally
-    - text: "SA1019.*ioutil"
-      linters: [staticcheck]
-
-    # Inline hints are informational, not errors
-    - text: "^inline:"
-      linters: [govet]
+    - govet
+    - staticcheck
+    - errcheck
+  exclusions:
+    # Pre-existing violations in inherited core code.
+    # These packages are protected (do not modify without explicit task scope).
+    # Violations will be addressed in dedicated refactor tasks.
+    rules:
+      - path: "^client/"
+        linters: [errcheck, staticcheck, unused]
+      - path: "^lib/"
+        linters: [errcheck, staticcheck, unused]
+      - path: "^auth/"
+        linters: [errcheck, staticcheck]
+      # ioutil deprecation is style, not a bug
+      - linters: [staticcheck]
+        text: "SA1019.*ioutil"
+      # Inline hints are informational
+      - linters: [govet]
+        text: "^inline:"
