@@ -24,3 +24,9 @@ run.sh
 .backlog/
 # Wails build output
 build/bin/
+
+# Android
+apps/mobile/android/local.properties
+apps/mobile/android/.gradle/
+apps/mobile/android/app/build/
+apps/mobile/android/build/
