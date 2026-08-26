@@ -3,45 +3,29 @@ module github.com/ao-data/albiondata-client
 go 1.27.0
 
 require (
-	github.com/ao-data/go-githubupdate v0.0.0-20260201170319-c56c2e714903
-	github.com/ctcpip/notifize v1.0.1
-	github.com/getlantern/systray v1.2.2
-	github.com/gonutz/w32 v1.0.0
-	github.com/google/gopacket v1.1.19
-	github.com/gorilla/websocket v1.5.3
-	github.com/mattn/go-colorable v0.1.14
-	github.com/mitchellh/mapstructure v1.5.0
-	github.com/nats-io/go-nats v1.7.2
-	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/sirupsen/logrus v1.9.4
-	github.com/spf13/viper v1.21.0
-	github.com/wailsapp/wails/v2 v2.14.0
-	golang.org/x/oauth2 v0.36.0
-	golang.org/x/sys v0.46.0
-	gopkg.in/toast.v1 v1.0.0-20180812000517-0a84660828b2
-)
-
-require (
 	aead.dev/minisign v0.3.0 // indirect
 	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/getlantern/context v0.0.0-20220418194847-3d5e7a086201 // indirect
 	github.com/getlantern/errors v1.0.4 // indirect
+	github.com/getlantern/golog v0.0.0-20230503153817-8e72de7e0a65 // indirect
 	github.com/getlantern/hex v0.0.0-20220104173244-ad7e4b9194dc // indirect
 	github.com/getlantern/hidden v0.0.0-20220104173330-f221c5a24770 // indirect
+	github.com/getlantern/ops v0.0.0-20231025133620-f368ab734534 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
-	github.com/golang/protobuf v1.3.2 // indirect
 	github.com/google/go-github/v68 v68.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect
 	github.com/labstack/echo/v4 v4.13.3 // indirect
 	github.com/labstack/gommon v0.4.2 // indirect
@@ -51,12 +35,20 @@ require (
 	github.com/leaanthony/u v1.1.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/minio/selfupdate v0.6.0 // indirect
+	github.com/mitchellh/mapstructure v1.5.0 // indirect
+	github.com/nats-io/go-nats v1.7.2 // indirect
+	github.com/nats-io/nkeys v0.4.15 // indirect
+	github.com/nats-io/nuid v1.0.1 // indirect
+	github.com/nu7hatch/gouuid v0.0.0-20131221200532-179d4d0c4d8d // indirect
 	github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
 	github.com/samber/lo v1.49.1 // indirect
+	github.com/spf13/afero v1.15.0 // indirect
+	github.com/spf13/cast v1.10.0 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tkrajina/go-reflector v0.5.8 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
@@ -73,21 +65,24 @@ require (
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
+	google.golang.org/protobuf v1.33.0 // indirect
 )
 
 require (
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/getlantern/golog v0.0.0-20230503153817-8e72de7e0a65 // indirect
-	github.com/getlantern/ops v0.0.0-20231025133620-f368ab734534 // indirect
-	github.com/nats-io/gnatsd v1.4.1 // indirect
-	github.com/nats-io/nkeys v0.4.15 // indirect
-	github.com/nats-io/nuid v1.0.1 // indirect
-	github.com/nu7hatch/gouuid v0.0.0-20131221200532-179d4d0c4d8d
-	github.com/spf13/afero v1.15.0 // indirect
-	github.com/spf13/cast v1.10.0 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/ao-data/albiondata-collector v0.0.0
+	github.com/ao-data/go-githubupdate v0.0.0-20260201170319-c56c2e714903
+	github.com/ctcpip/notifize v1.0.1
+	github.com/getlantern/systray v1.2.2
+	github.com/gonutz/w32 v1.0.0
+	github.com/google/gopacket v1.1.19
+	github.com/mattn/go-colorable v0.1.14
+	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
+	github.com/sirupsen/logrus v1.9.4
+	github.com/spf13/viper v1.21.0
+	github.com/wailsapp/wails/v2 v2.14.0
+	golang.org/x/oauth2 v0.36.0
+	golang.org/x/sys v0.47.0
+	gopkg.in/toast.v1 v1.0.0-20180812000517-0a84660828b2
 )
-
-require github.com/ao-data/albiondata-collector v0.0.0
 
 replace github.com/ao-data/albiondata-collector => ../../libs/collector

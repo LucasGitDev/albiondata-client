@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ao-data/albiondata-collector/pipeline"
 	"github.com/ao-data/albiondata-client/log"
 
 	"github.com/mattn/go-colorable"
@@ -333,7 +334,7 @@ func (config *config) setupDebugEvents() {
 		if shouldDebug {
 			verb = "Showing"
 		}
-		log.Debugf("[%v] event: [%v]%v", verb, number, EventType(number))
+		log.Debugf("[%v] event: [%v]%v", verb, number, pipeline.EventType(number))
 	}
 
 }
@@ -364,7 +365,7 @@ func (config *config) setupDebugOperations() {
 		if shouldDebug {
 			verb = "Showing"
 		}
-		log.Debugf("[%v] operation: [%v]%v", verb, number, OperationType(number))
+		log.Debugf("[%v] operation: [%v]%v", verb, number, pipeline.OperationType(number))
 	}
 
 }
