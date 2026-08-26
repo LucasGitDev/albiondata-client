@@ -51,10 +51,13 @@ class UdpProxy(
 
     fun stop() {
         running.set(false)
-        selector.wakeup()
-        selectorThread?.join(2000)
+        // Close channels first so selector.select() unblocks if wakeup() races
         channels.values.forEach { runCatching { it.channel.close() } }
         channels.clear()
+        selector.wakeup()
+        // Wait for receiver thread to fully exit before caller nulls tunOutputStream
+        selectorThread?.join(3000)
+        selectorThread = null
         runCatching { selector.close() }
     }
 

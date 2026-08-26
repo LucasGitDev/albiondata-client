@@ -50,6 +50,7 @@ class PacketCaptureVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private val running = AtomicBoolean(false)
     private var captureThread: Thread? = null
+    private var tunInputStream: FileInputStream? = null
     private var collector: mobile.MobileCollector? = null
     private var udpProxy: UdpProxy? = null
     private var tunOutputStream: FileOutputStream? = null
@@ -206,6 +207,7 @@ class PacketCaptureVpnService : VpnService() {
 
         val tunOut = FileOutputStream(vpnInterface!!.fileDescriptor)
         tunOutputStream = tunOut
+        tunInputStream = FileInputStream(vpnInterface!!.fileDescriptor)
         udpProxy = UdpProxy(this, tunOut).also { it.start() }
 
         captureThread = Thread({
@@ -214,8 +216,7 @@ class PacketCaptureVpnService : VpnService() {
     }
 
     private fun readPackets() {
-        val iface = vpnInterface ?: return
-        val stream = FileInputStream(iface.fileDescriptor)
+        val stream = tunInputStream ?: return
         val buffer = ByteBuffer.allocate(BUFFER_SIZE)
         var packetCount = 0L
         var lastBroadcast = 0L
@@ -292,10 +293,17 @@ class PacketCaptureVpnService : VpnService() {
 
     private fun stopCapture() {
         running.set(false)
+        // Interrupt capture thread and wait for it to exit before closing streams
         captureThread?.interrupt()
+        captureThread?.join(2000)
         captureThread = null
+        // Stop proxy (joins its selector thread internally) before nulling tunOutputStream
         udpProxy?.stop()
         udpProxy = null
+        // Close streams after all writers have exited
+        runCatching { tunInputStream?.close() }
+        tunInputStream = null
+        runCatching { tunOutputStream?.close() }
         tunOutputStream = null
         try {
             vpnInterface?.close()
