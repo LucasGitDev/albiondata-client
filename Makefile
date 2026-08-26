@@ -1,4 +1,4 @@
-.PHONY: check run fmt validate-fmt build-windows build-linux build-darwin generate doctor setup setup-android
+.PHONY: check run fmt validate-fmt build-windows build-linux build-darwin generate doctor setup setup-android gomobile-android
 
 # ── Quality gate ─────────────────────────────────────────────────────────────
 
@@ -56,6 +56,13 @@ generate:
 dev-setup:
 	scripts/setup-android-dev.sh
 
+# ── Mobile builds ────────────────────────────────────────────────────────────
+
+## gomobile-android: build collector.aar for Android and place it in apps/mobile/android/app/libs/
+## Requires: gomobile, ANDROID_HOME or ANDROID_SDK_ROOT (run `make setup-android` first)
+gomobile-android:
+	scripts/gomobile-android.sh
+
 # ── Help ─────────────────────────────────────────────────────────────────────
 
 help:
@@ -69,4 +76,5 @@ help:
 	@echo "  make run             Run app in dev mode"
 	@echo "  make fmt             Format Go + frontend code"
 	@echo "  make generate        Regenerate Wails bindings"
+	@echo "  make gomobile-android Build collector.aar for Android"
 	@echo ""
