@@ -23,6 +23,7 @@ android {
             .orElse(providers.environmentVariable("GOOGLE_CLIENT_ID"))
             .getOrElse("")
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
+        manifestPlaceholders["appAuthRedirectScheme"] = "com.albiondata.client"
     }
 
     buildTypes {

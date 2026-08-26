@@ -1,6 +1,6 @@
 module github.com/ao-data/albiondata-client
 
-go 1.26.5
+go 1.27.0
 
 require (
 	aead.dev/minisign v0.3.0 // indirect

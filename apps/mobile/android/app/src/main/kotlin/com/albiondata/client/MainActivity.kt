@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -170,7 +171,7 @@ class MainActivity : ComponentActivity() {
     private fun handleOAuthResult(data: Intent) {
         // Fallback path: if AppAuth returns result via onActivityResult (non-Custom Tab flow).
         // The primary path is AuthCallbackActivity broadcast.
-        androidx.lifecycle.lifecycleScope.launch {
+        lifecycleScope.launch {
             val result = oauthManager.exchangeCode(data, BuildConfig.GOOGLE_CLIENT_ID)
             if (result != null) {
                 viewModel.saveAuthToken(result.accessToken, result.email ?: "")

@@ -8,7 +8,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
-import collector.Mobile
+import mobile.Mobile
 import com.albiondata.client.auth.AuthManager
 import com.albiondata.client.auth.TokenExpiredException
 import kotlinx.coroutines.CoroutineScope
@@ -49,7 +49,7 @@ class PacketCaptureVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private val running = AtomicBoolean(false)
     private var captureThread: Thread? = null
-    private var collector: Mobile.MobileCollector? = null
+    private var collector: mobile.MobileCollector? = null
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val authManager by lazy { AuthManager(applicationContext) }
@@ -165,15 +165,15 @@ class PacketCaptureVpnService : VpnService() {
     private fun startCapture(ingestURL: String, authToken: String) {
         if (running.getAndSet(true)) return
 
-        val c = Mobile.NewMobileCollector().also {
-            it.setIngestURL(ingestURL)
-            if (authToken.isNotEmpty()) it.setAuthToken(authToken)
-            val err = it.start()
-            if (err != null) {
-                Log.e(TAG, "Failed to start Go collector: $err")
-                running.set(false)
-                return
-            }
+        val c = Mobile.newMobileCollector()
+        c.setIngestURL(ingestURL)
+        if (authToken.isNotEmpty()) c.setAuthToken(authToken)
+        try {
+            c.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start Go collector: ${e.message}")
+            running.set(false)
+            return
         }
         collector = c
 

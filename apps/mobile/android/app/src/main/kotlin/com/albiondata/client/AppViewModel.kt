@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.albiondata.client.auth.AuthManager
 import com.albiondata.client.data.AppSettings
 import com.albiondata.client.data.SettingsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,7 +44,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val status = intent.getStringExtra(PacketCaptureVpnService.EXTRA_UPLOAD_STATUS)
                     _uiState.update { it.copy(lastUploadStatus = status) }
                 }
-                PacketCaptureVpnService.ACTION_AUTH_EXPIRED -> {
+                AuthManager.ACTION_AUTH_EXPIRED -> {
                     // Service stopped; clear running state and notify user via status.
                     _uiState.update { it.copy(captureRunning = false, lastUploadStatus = "Auth expired — please log in again") }
                 }
@@ -61,7 +62,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val filter = IntentFilter().apply {
             addAction(PacketCaptureVpnService.ACTION_PACKET_COUNT)
             addAction(PacketCaptureVpnService.ACTION_UPLOAD_STATUS)
-            addAction(PacketCaptureVpnService.ACTION_AUTH_EXPIRED)
+            addAction(AuthManager.ACTION_AUTH_EXPIRED)
         }
         ContextCompat.registerReceiver(
             application,

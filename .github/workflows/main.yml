@@ -13,7 +13,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.25'
+        go-version: '1.27'
     - name: Build
       run: make build-linux
     - uses: shogo82148/actions-upload-release-asset@v1
@@ -29,7 +29,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.25'
+        go-version: '1.27'
 
     - name: install nsis
       run: sudo apt-get update; sudo apt-get -y install nsis
@@ -76,7 +76,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.25'
+        go-version: '1.27'
 
     - name: Build
       run: CGO_ENABLED=1 GOARCH=amd64 CC="clang -arch x86_64" CGO_LDFLAGS="-arch x86_64" go build -ldflags "-s -w -X main.version=$GITHUB_REF_NAME" -o albiondata-client ./apps/desktop/
