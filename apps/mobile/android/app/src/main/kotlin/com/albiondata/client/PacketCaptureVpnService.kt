@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.VpnService
-import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import java.io.FileInputStream
@@ -20,6 +19,7 @@ class PacketCaptureVpnService : VpnService() {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "vpn_capture_channel"
         private const val BUFFER_SIZE = 32768
+        private const val TUN_MTU = 1500
 
         const val ACTION_START = "com.albiondata.client.VPN_START"
         const val ACTION_STOP = "com.albiondata.client.VPN_STOP"
@@ -89,7 +89,7 @@ class PacketCaptureVpnService : VpnService() {
             .setSession(getString(R.string.app_name))
             .addAddress("10.0.0.2", 24)
             .addRoute("0.0.0.0", 0)
-            .setMtu(BUFFER_SIZE)
+            .setMtu(TUN_MTU)
 
         vpnInterface = try {
             builder.establish()

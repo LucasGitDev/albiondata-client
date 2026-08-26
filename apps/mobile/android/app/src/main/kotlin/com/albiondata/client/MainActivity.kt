@@ -37,6 +37,9 @@ import com.albiondata.client.ui.theme.AlbionDataClientTheme
 
 class MainActivity : ComponentActivity() {
 
+    // Known limitation (TASK-11.10): captureRunning is Activity-local state.
+    // If the OS restarts the service via START_STICKY, the UI will incorrectly show idle.
+    // Acceptable for validation phase; must be replaced with service-bound state before prod.
     private var captureRunning by mutableStateOf(false)
 
     private val vpnPermissionLauncher = registerForActivityResult(
