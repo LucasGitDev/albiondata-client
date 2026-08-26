@@ -17,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -49,7 +50,10 @@ class PacketCaptureVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private val running = AtomicBoolean(false)
     private var captureThread: Thread? = null
+    private var tunInputStream: FileInputStream? = null
     private var collector: mobile.MobileCollector? = null
+    private var udpProxy: UdpProxy? = null
+    private var tunOutputStream: FileOutputStream? = null
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val authManager by lazy { AuthManager(applicationContext) }
@@ -182,6 +186,8 @@ class PacketCaptureVpnService : VpnService() {
             .addAddress("10.0.0.2", 24)
             .addRoute("0.0.0.0", 0)
             .setMtu(TUN_MTU)
+            // Prevent our own upload HTTP traffic from looping back through the TUN
+            .addDisallowedApplication(packageName)
 
         vpnInterface = try {
             builder.establish()
@@ -199,14 +205,18 @@ class PacketCaptureVpnService : VpnService() {
 
         Log.i(TAG, "VPN interface established, starting packet capture")
 
+        val tunOut = FileOutputStream(vpnInterface!!.fileDescriptor)
+        tunOutputStream = tunOut
+        tunInputStream = FileInputStream(vpnInterface!!.fileDescriptor)
+        udpProxy = UdpProxy(this, tunOut).also { it.start() }
+
         captureThread = Thread({
             readPackets()
         }, "packet-capture").also { it.start() }
     }
 
     private fun readPackets() {
-        val iface = vpnInterface ?: return
-        val stream = FileInputStream(iface.fileDescriptor)
+        val stream = tunInputStream ?: return
         val buffer = ByteBuffer.allocate(BUFFER_SIZE)
         var packetCount = 0L
         var lastBroadcast = 0L
@@ -224,9 +234,13 @@ class PacketCaptureVpnService : VpnService() {
 
             if (length > 0) {
                 packetCount++
-                Log.d(TAG, "Packet #$packetCount: $length bytes")
+                val raw = buffer.array().copyOf(length)
 
-                collector?.feedPacket(buffer.array().copyOf(length))
+                // Inspect packet (Go collector filters for Albion UDP port 5056)
+                collector?.feedPacket(raw)
+
+                // Forward packet to internet so the game/app gets a response
+                forwardPacket(raw)
 
                 if (packetCount - lastBroadcast >= 100) {
                     lastBroadcast = packetCount
@@ -241,6 +255,35 @@ class PacketCaptureVpnService : VpnService() {
         sendLocalBroadcast(ACTION_PACKET_COUNT) { putExtra(EXTRA_PACKET_COUNT, packetCount) }
     }
 
+    private fun forwardPacket(raw: ByteArray) {
+        val ip = IpPacketHelper.parseIpv4Header(raw) ?: return
+
+        when (ip.protocol) {
+            IpPacketHelper.PROTO_UDP -> {
+                val udp = IpPacketHelper.parseUdpHeader(raw, ip.headerLen) ?: return
+                udpProxy?.forward(ip.srcIP, udp.srcPort, ip.dstIP, udp.dstPort, udp.payload)
+            }
+            IpPacketHelper.PROTO_TCP -> {
+                // Full TCP proxying is deferred (see TASK-11.18 notes). Send RST so
+                // the game fails fast on TCP and retries rather than hanging indefinitely.
+                val tcp = IpPacketHelper.parseTcpHeader(raw, ip.headerLen) ?: return
+                if (tcp.flags and IpPacketHelper.TCP_FLAG_SYN != 0 &&
+                    tcp.flags and IpPacketHelper.TCP_FLAG_ACK == 0) {
+                    val rst = IpPacketHelper.buildTcpRst(
+                        srcIP = ip.dstIP,
+                        srcPort = tcp.dstPort,
+                        dstIP = ip.srcIP,
+                        dstPort = tcp.srcPort,
+                        ackNum = tcp.seqNum + 1,
+                    )
+                    val out = tunOutputStream ?: return
+                    synchronized(out) { out.write(rst) }
+                }
+            }
+            // ICMP and other protocols: drop silently (acceptable for this use case)
+        }
+    }
+
     private fun sendLocalBroadcast(action: String, extras: Intent.() -> Unit = {}) {
         sendBroadcast(Intent(action).apply {
             `package` = packageName
@@ -250,8 +293,18 @@ class PacketCaptureVpnService : VpnService() {
 
     private fun stopCapture() {
         running.set(false)
+        // Interrupt capture thread and wait for it to exit before closing streams
         captureThread?.interrupt()
+        captureThread?.join(2000)
         captureThread = null
+        // Stop proxy (joins its selector thread internally) before nulling tunOutputStream
+        udpProxy?.stop()
+        udpProxy = null
+        // Close streams after all writers have exited
+        runCatching { tunInputStream?.close() }
+        tunInputStream = null
+        runCatching { tunOutputStream?.close() }
+        tunOutputStream = null
         try {
             vpnInterface?.close()
         } catch (e: Exception) {
