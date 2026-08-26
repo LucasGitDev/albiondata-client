@@ -1,7 +1,8 @@
 # .github/workflows/test-build.yaml
 
-on: 
+on:
   push:
+    branches: [master]
   pull_request:
 
 jobs:
