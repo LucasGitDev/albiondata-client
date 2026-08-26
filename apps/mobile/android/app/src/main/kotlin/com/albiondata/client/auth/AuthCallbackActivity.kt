@@ -2,41 +2,79 @@ package com.albiondata.client.auth
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
-import net.openid.appauth.AuthorizationResponse
-import net.openid.appauth.AuthorizationException
+import com.albiondata.client.BuildConfig
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
- * Trampoline activity that receives the OAuth redirect URI
- * (albiondata://oauth/callback) and forwards the result to whichever
- * activity started the auth flow via [OAuthManager.handleRedirectIntent].
+ * Transparent trampoline activity that captures the OAuth redirect URI
+ * (`albiondata://oauth/callback`) and delegates token exchange to [AuthManager].
  *
- * Declared with android:launchMode="singleTask" so the redirect never
- * spawns a duplicate instance.
+ * After exchange, it sends a broadcast so MainActivity / VpnService can react,
+ * then finishes immediately — it is never shown to the user.
  */
 class AuthCallbackActivity : ComponentActivity() {
+
+    companion object {
+        private const val TAG = "AuthCallback"
+
+        /** Broadcast sent on successful token exchange. */
+        const val ACTION_LOGIN_SUCCESS = "com.albiondata.client.LOGIN_SUCCESS"
+
+        /** Broadcast sent when token exchange fails. */
+        const val ACTION_LOGIN_FAILED = "com.albiondata.client.LOGIN_FAILED"
+        const val EXTRA_ERROR_MESSAGE = "error_message"
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val authManager by lazy { AuthManager(applicationContext) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handleRedirect(intent)
+        handleIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        handleRedirect(intent)
+        handleIntent(intent)
     }
 
-    private fun handleRedirect(intent: Intent) {
-        // Forward the raw intent to OAuthManager; the pending result will be
-        // delivered back to MainActivity via the ActivityResultLauncher callback.
-        val broadcast = Intent(ACTION_OAUTH_RESPONSE).apply {
-            `package` = packageName
-            putExtras(intent)
+    private fun handleIntent(intent: Intent?) {
+        if (intent == null) {
+            finish()
+            return
         }
-        sendBroadcast(broadcast)
-        finish()
+
+        val clientId = BuildConfig.GOOGLE_CLIENT_ID
+        if (clientId.isBlank()) {
+            Log.e(TAG, "GOOGLE_CLIENT_ID is not set in BuildConfig")
+            broadcastFailure("GOOGLE_CLIENT_ID not configured")
+            finish()
+            return
+        }
+
+        scope.launch {
+            try {
+                authManager.handleAuthResponse(intent, clientId)
+                sendBroadcast(Intent(ACTION_LOGIN_SUCCESS))
+                Log.i(TAG, "Login successful — broadcast sent")
+            } catch (e: Exception) {
+                Log.e(TAG, "Token exchange failed", e)
+                broadcastFailure(e.message ?: "Unknown error")
+            } finally {
+                finish()
+            }
+        }
     }
 
-    companion object {
-        const val ACTION_OAUTH_RESPONSE = "com.albiondata.client.OAUTH_RESPONSE"
+    private fun broadcastFailure(message: String) {
+        val intent = Intent(ACTION_LOGIN_FAILED).apply {
+            putExtra(EXTRA_ERROR_MESSAGE, message)
+        }
+        sendBroadcast(intent)
     }
 }

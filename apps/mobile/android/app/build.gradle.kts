@@ -16,6 +16,13 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Injected at build time via -PGOOGLE_CLIENT_ID=... gradle property or environment.
+        // The client_id for an Android installed-app OAuth client has no secret (RFC 8252 §8.4).
+        val googleClientId = providers.gradleProperty("GOOGLE_CLIENT_ID")
+            .orElse(providers.environmentVariable("GOOGLE_CLIENT_ID"))
+            .getOrElse("")
+        buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
     }
 
     buildTypes {
@@ -36,6 +43,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -59,6 +67,8 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.appauth)
     implementation(libs.androidx.browser)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

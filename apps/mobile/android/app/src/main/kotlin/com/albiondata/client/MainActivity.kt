@@ -1,7 +1,10 @@
 package com.albiondata.client
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.VpnService
 import android.os.Bundle
 import android.util.Log
@@ -16,6 +19,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.albiondata.client.auth.AuthCallbackActivity
+import com.albiondata.client.auth.AuthManager
 import com.albiondata.client.auth.OAuthManager
 import com.albiondata.client.ui.SettingsScreen
 import com.albiondata.client.ui.StatusScreen
@@ -23,10 +28,6 @@ import com.albiondata.client.ui.theme.AlbionDataClientTheme
 import kotlinx.coroutines.launch
 
 private const val TAG = "MainActivity"
-
-// TODO: Replace with real Google OAuth client ID from google-services.json.
-// Left as a compile-time constant so it can be injected via buildConfigField in CI.
-private const val GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com"
 
 private object Nav {
     const val STATUS = "status"
@@ -37,6 +38,7 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: AppViewModel by viewModels()
     private lateinit var oauthManager: OAuthManager
+    private val authManager by lazy { AuthManager(applicationContext) }
 
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -54,10 +56,38 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Broadcast receiver for auth state changes emitted by AuthCallbackActivity / VpnService.
+    private val authReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                AuthCallbackActivity.ACTION_LOGIN_SUCCESS -> {
+                    val token = authManager.tokenStore.accessToken ?: return
+                    val email = authManager.tokenStore.userEmail ?: ""
+                    viewModel.saveAuthToken(token, email)
+                    Log.i(TAG, "Auth broadcast: login success — email=$email")
+                }
+                AuthCallbackActivity.ACTION_LOGIN_FAILED -> {
+                    Log.w(TAG, "Auth broadcast: login failed")
+                }
+                AuthManager.ACTION_AUTH_EXPIRED -> {
+                    viewModel.logout()
+                    Log.w(TAG, "Auth broadcast: session expired")
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         oauthManager = OAuthManager(this)
+
+        val filter = IntentFilter().apply {
+            addAction(AuthCallbackActivity.ACTION_LOGIN_SUCCESS)
+            addAction(AuthCallbackActivity.ACTION_LOGIN_FAILED)
+            addAction(AuthManager.ACTION_AUTH_EXPIRED)
+        }
+        registerReceiver(authReceiver, filter, RECEIVER_NOT_EXPORTED)
 
         setContent {
             AlbionDataClientTheme {
@@ -86,7 +116,7 @@ class MainActivity : ComponentActivity() {
                             onLoginClick = { startOAuthFlow() },
                             onLogoutClick = {
                                 viewModel.logout()
-                                // Stop capture if running in private mode.
+                                authManager.logout()
                                 if (uiState.captureRunning) stopVpnService()
                             },
                         )
@@ -98,6 +128,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         oauthManager.destroy()
+        unregisterReceiver(authReceiver)
         super.onDestroy()
     }
 
@@ -127,24 +158,23 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startOAuthFlow() {
-        if (GOOGLE_CLIENT_ID.startsWith("YOUR_")) {
+        val clientId = BuildConfig.GOOGLE_CLIENT_ID
+        if (clientId.isBlank() || clientId.startsWith("YOUR_")) {
             Log.w(TAG, "Google OAuth client ID not configured — skipping auth flow")
             return
         }
-        val authIntent = oauthManager.buildAuthIntent(GOOGLE_CLIENT_ID)
+        val authIntent = authManager.buildAuthIntent(clientId)
         oauthLauncher.launch(authIntent)
     }
 
     private fun handleOAuthResult(data: Intent) {
-        // Launch coroutine to exchange code for tokens.
-        // coroutineScope not available here; use lifecycle scope.
+        // Fallback path: if AppAuth returns result via onActivityResult (non-Custom Tab flow).
+        // The primary path is AuthCallbackActivity broadcast.
         androidx.lifecycle.lifecycleScope.launch {
-            val result = oauthManager.exchangeCode(data, GOOGLE_CLIENT_ID)
+            val result = oauthManager.exchangeCode(data, BuildConfig.GOOGLE_CLIENT_ID)
             if (result != null) {
                 viewModel.saveAuthToken(result.accessToken, result.email ?: "")
-                Log.i(TAG, "OAuth success — email=${result.email}")
-            } else {
-                Log.w(TAG, "OAuth token exchange failed or cancelled")
+                Log.i(TAG, "OAuth direct result — email=${result.email}")
             }
         }
     }

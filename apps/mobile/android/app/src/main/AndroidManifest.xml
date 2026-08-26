@@ -33,7 +33,7 @@
             </intent-filter>
         </service>
 
-        <!-- Receives the OAuth redirect URI albiondata://oauth/callback -->
+        <!-- Receives the OAuth redirect from Custom Tabs / system browser -->
         <activity
             android:name=".auth.AuthCallbackActivity"
             android:exported="true"
@@ -42,7 +42,10 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="albiondata" android:host="oauth" android:path="/callback" />
+                <data
+                    android:scheme="albiondata"
+                    android:host="oauth"
+                    android:pathPrefix="/callback" />
             </intent-filter>
         </activity>
     </application>
