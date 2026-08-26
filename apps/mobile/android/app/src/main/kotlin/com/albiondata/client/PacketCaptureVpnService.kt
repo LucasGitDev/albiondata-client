@@ -43,6 +43,10 @@ class PacketCaptureVpnService : VpnService() {
         const val EXTRA_INGEST_URL = "com.albiondata.client.INGEST_URL"
         const val EXTRA_AUTH_TOKEN = "com.albiondata.client.AUTH_TOKEN"
 
+        const val ACTION_LOG_EVENT = "com.albiondata.client.LOG_EVENT"
+        const val EXTRA_LOG_TYPE = "log_type"
+        const val EXTRA_LOG_MESSAGE = "log_message"
+
         private const val DEFAULT_INGEST_URL = "https://www.albion-online-data.com/api/v2"
         private const val TOKEN_REFRESH_INTERVAL_MS = 60_000L
     }
@@ -204,6 +208,7 @@ class PacketCaptureVpnService : VpnService() {
         }
 
         Log.i(TAG, "VPN interface established, starting packet capture")
+        emitLog("INFO", "VPN capture started — ingest: $ingestURL")
 
         val tunOut = FileOutputStream(vpnInterface!!.fileDescriptor)
         tunOutputStream = tunOut
@@ -247,11 +252,13 @@ class PacketCaptureVpnService : VpnService() {
                     sendLocalBroadcast(ACTION_PACKET_COUNT) {
                         putExtra(EXTRA_PACKET_COUNT, packetCount)
                     }
+                    emitLog("CAPTURE", "$packetCount packets captured")
                 }
             }
         }
 
         Log.i(TAG, "Packet capture loop stopped. Total packets: $packetCount")
+        emitLog("INFO", "VPN capture stopped. Total: $packetCount packets")
         sendLocalBroadcast(ACTION_PACKET_COUNT) { putExtra(EXTRA_PACKET_COUNT, packetCount) }
     }
 
@@ -281,6 +288,13 @@ class PacketCaptureVpnService : VpnService() {
                 }
             }
             // ICMP and other protocols: drop silently (acceptable for this use case)
+        }
+    }
+
+    private fun emitLog(type: String, message: String) {
+        sendLocalBroadcast(ACTION_LOG_EVENT) {
+            putExtra(EXTRA_LOG_TYPE, type)
+            putExtra(EXTRA_LOG_MESSAGE, message)
         }
     }
 

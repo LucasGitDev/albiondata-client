@@ -23,6 +23,7 @@ import androidx.navigation.compose.rememberNavController
 import com.albiondata.client.auth.AuthCallbackActivity
 import com.albiondata.client.auth.AuthManager
 import com.albiondata.client.auth.OAuthManager
+import com.albiondata.client.ui.LogsScreen
 import com.albiondata.client.ui.SettingsScreen
 import com.albiondata.client.ui.StatusScreen
 import com.albiondata.client.ui.theme.AlbionDataClientTheme
@@ -33,6 +34,7 @@ private const val TAG = "MainActivity"
 private object Nav {
     const val STATUS = "status"
     const val SETTINGS = "settings"
+    const val LOGS = "logs"
 }
 
 class MainActivity : ComponentActivity() {
@@ -103,7 +105,15 @@ class MainActivity : ComponentActivity() {
                             onStartCapture = { requestVpnPermission() },
                             onStopCapture = { stopVpnService() },
                             onOpenSettings = { navController.navigate(Nav.SETTINGS) },
+                            onOpenLogs = { navController.navigate(Nav.LOGS) },
                             onLoginRequired = { navController.navigate(Nav.SETTINGS) },
+                        )
+                    }
+                    composable(Nav.LOGS) {
+                        LogsScreen(
+                            logs = uiState.logEvents,
+                            onBack = { navController.popBackStack() },
+                            onClear = { viewModel.clearLogs() },
                         )
                     }
                     composable(Nav.SETTINGS) {

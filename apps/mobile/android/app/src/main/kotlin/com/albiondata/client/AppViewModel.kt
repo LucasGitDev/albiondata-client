@@ -10,6 +10,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.albiondata.client.auth.AuthManager
 import com.albiondata.client.data.AppSettings
+import com.albiondata.client.data.LogEvent
+import com.albiondata.client.data.LogEventType
 import com.albiondata.client.data.SettingsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -19,16 +21,20 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+private const val MAX_LOG_ENTRIES = 500
+
 data class UiState(
     val captureRunning: Boolean = false,
     val packetCount: Long = 0L,
     val lastUploadStatus: String? = null,
     val settings: AppSettings = AppSettings(),
+    val logEvents: List<LogEvent> = emptyList(),
 )
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repo = SettingsRepository(application)
+    private var logIdCounter = 0L
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
@@ -43,10 +49,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 PacketCaptureVpnService.ACTION_UPLOAD_STATUS -> {
                     val status = intent.getStringExtra(PacketCaptureVpnService.EXTRA_UPLOAD_STATUS)
                     _uiState.update { it.copy(lastUploadStatus = status) }
+                    if (status != null) {
+                        val type = if (status.startsWith("OK") || status.startsWith("2")) "UPLOAD" else "ERROR"
+                        appendLog(LogEvent(id = ++logIdCounter, type = LogEventType.valueOf(type), message = "Upload: $status"))
+                    }
+                }
+                PacketCaptureVpnService.ACTION_LOG_EVENT -> {
+                    val type = intent.getStringExtra(PacketCaptureVpnService.EXTRA_LOG_TYPE)
+                        ?.let { runCatching { LogEventType.valueOf(it) }.getOrNull() }
+                        ?: LogEventType.INFO
+                    val msg = intent.getStringExtra(PacketCaptureVpnService.EXTRA_LOG_MESSAGE) ?: return
+                    appendLog(LogEvent(id = ++logIdCounter, type = type, message = msg))
                 }
                 AuthManager.ACTION_AUTH_EXPIRED -> {
                     // Service stopped; clear running state and notify user via status.
                     _uiState.update { it.copy(captureRunning = false, lastUploadStatus = "Auth expired — please log in again") }
+                    appendLog(LogEvent(id = ++logIdCounter, type = LogEventType.ERROR, message = "Auth expired"))
                 }
             }
         }
@@ -62,6 +80,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val filter = IntentFilter().apply {
             addAction(PacketCaptureVpnService.ACTION_PACKET_COUNT)
             addAction(PacketCaptureVpnService.ACTION_UPLOAD_STATUS)
+            addAction(PacketCaptureVpnService.ACTION_LOG_EVENT)
             addAction(AuthManager.ACTION_AUTH_EXPIRED)
         }
         ContextCompat.registerReceiver(
@@ -75,6 +94,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         getApplication<Application>().unregisterReceiver(packetCountReceiver)
+    }
+
+    private fun appendLog(event: LogEvent) {
+        _uiState.update { state ->
+            val updated = if (state.logEvents.size >= MAX_LOG_ENTRIES) {
+                state.logEvents.drop(1) + event
+            } else {
+                state.logEvents + event
+            }
+            state.copy(logEvents = updated)
+        }
+    }
+
+    fun clearLogs() {
+        _uiState.update { it.copy(logEvents = emptyList()) }
     }
 
     fun setCaptureRunning(running: Boolean) {
