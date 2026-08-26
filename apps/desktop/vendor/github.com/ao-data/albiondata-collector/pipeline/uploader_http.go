@@ -63,9 +63,9 @@ func (u *httpUploader) sendToIngest(body []byte, topic string, state *albionStat
 	}
 
 	// See: https://stackoverflow.com/questions/17948827/reusing-http-connections-in-golang
-	io.Copy(ioutil.Discard, resp.Body)
+	_, _ = io.Copy(ioutil.Discard, resp.Body)
 
 	log.Printf("Successfully sent ingest request to %v", u.baseURL)
 
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 }

@@ -175,14 +175,14 @@ func deserializeTypedArray(buf *bytes.Buffer, elemType byte) interface{} {
 		result := make([]bool, size)
 		packedBytes := (size + 7) / 8
 		packed := make([]byte, packedBytes)
-		buf.Read(packed)
+		_, _ = buf.Read(packed)
 		for i := 0; i < size; i++ {
 			result[i] = (packed[i/8] & (1 << uint(i%8))) != 0
 		}
 		return result
 	case typeByte:
 		data := make([]byte, size)
-		buf.Read(data)
+		_, _ = buf.Read(data)
 		return data
 	case typeShort:
 		result := make([]int16, size)
@@ -333,13 +333,13 @@ func deserializeCustomPayload(buf *bytes.Buffer, customID byte, isSlim bool) int
 	if size < 0 || size > buf.Len() {
 		if isSlim {
 			data := make([]byte, buf.Len())
-			buf.Read(data)
+			_, _ = buf.Read(data)
 			return map[string]interface{}{"type": customID, "data": data}
 		}
 		return nil
 	}
 	data := make([]byte, size)
-	buf.Read(data)
+	_, _ = buf.Read(data)
 	return map[string]interface{}{"type": customID, "data": data}
 }
 
@@ -382,25 +382,25 @@ func deserializeEventDataInner(buf *bytes.Buffer) interface{} {
 
 func readInt16(buf *bytes.Buffer) int16 {
 	var v int16
-	binary.Read(buf, binary.LittleEndian, &v)
+	_ = binary.Read(buf, binary.LittleEndian, &v)
 	return v
 }
 
 func readUint16(buf *bytes.Buffer) uint16 {
 	var v uint16
-	binary.Read(buf, binary.LittleEndian, &v)
+	_ = binary.Read(buf, binary.LittleEndian, &v)
 	return v
 }
 
 func readFloat32(buf *bytes.Buffer) float32 {
 	var bits uint32
-	binary.Read(buf, binary.LittleEndian, &bits)
+	_ = binary.Read(buf, binary.LittleEndian, &bits)
 	return math.Float32frombits(bits)
 }
 
 func readFloat64(buf *bytes.Buffer) float64 {
 	var bits uint64
-	binary.Read(buf, binary.LittleEndian, &bits)
+	_ = binary.Read(buf, binary.LittleEndian, &bits)
 	return math.Float64frombits(bits)
 }
 
@@ -411,7 +411,7 @@ func readString(buf *bytes.Buffer) string {
 		return ""
 	}
 	b := make([]byte, length)
-	buf.Read(b)
+	_, _ = buf.Read(b)
 	return string(b)
 }
 

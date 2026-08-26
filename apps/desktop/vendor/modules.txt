@@ -12,7 +12,7 @@ git.sr.ht/~jackmordaunt/go-toast/v2/internal/winrt/ui/notifications
 git.sr.ht/~jackmordaunt/go-toast/v2/tmpl
 git.sr.ht/~jackmordaunt/go-toast/v2/wintoast
 # github.com/ao-data/albiondata-collector v0.0.0 => ../../libs/collector
-## explicit; go 1.27.0
+## explicit; go 1.26.5
 github.com/ao-data/albiondata-collector
 github.com/ao-data/albiondata-collector/lib
 github.com/ao-data/albiondata-collector/photon

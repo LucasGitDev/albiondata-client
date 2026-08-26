@@ -8,6 +8,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import collector.Mobile
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
@@ -31,11 +32,17 @@ class PacketCaptureVpnService : VpnService() {
 
         const val EXTRA_PACKET_COUNT = "packet_count"
         const val EXTRA_UPLOAD_STATUS = "upload_status"
+
+        const val EXTRA_INGEST_URL = "com.albiondata.client.INGEST_URL"
+        const val EXTRA_AUTH_TOKEN = "com.albiondata.client.AUTH_TOKEN"
+
+        private const val DEFAULT_INGEST_URL = "https://www.albion-online-data.com/api/v2"
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private val running = AtomicBoolean(false)
     private var captureThread: Thread? = null
+    private var collector: Mobile.MobileCollector? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -45,8 +52,10 @@ class PacketCaptureVpnService : VpnService() {
                 return START_NOT_STICKY
             }
             else -> {
+                val ingestURL = intent?.getStringExtra(EXTRA_INGEST_URL) ?: DEFAULT_INGEST_URL
+                val authToken = intent?.getStringExtra(EXTRA_AUTH_TOKEN) ?: ""
                 startForegroundWithNotification()
-                startCapture()
+                startCapture(ingestURL, authToken)
             }
         }
         return START_STICKY
@@ -90,8 +99,21 @@ class PacketCaptureVpnService : VpnService() {
         manager.createNotificationChannel(channel)
     }
 
-    private fun startCapture() {
+    private fun startCapture(ingestURL: String, authToken: String) {
         if (running.getAndSet(true)) return
+
+        // Initialise the Go data pipeline.
+        val c = Mobile.NewMobileCollector().also {
+            it.setIngestURL(ingestURL)
+            if (authToken.isNotEmpty()) it.setAuthToken(authToken)
+            val err = it.start()
+            if (err != null) {
+                Log.e(TAG, "Failed to start Go collector: $err")
+                running.set(false)
+                return
+            }
+        }
+        collector = c
 
         val builder = Builder()
             .setSession(getString(R.string.app_name))
@@ -142,6 +164,10 @@ class PacketCaptureVpnService : VpnService() {
                 packetCount++
                 Log.d(TAG, "Packet #$packetCount: $length bytes")
 
+                // Forward the raw IPv4 packet to the Go data pipeline for
+                // Photon parsing and HTTP upload.
+                collector?.feedPacket(buffer.array().copyOf(length))
+
                 // Broadcast count every 100 packets to reduce IPC overhead.
                 if (packetCount - lastBroadcast >= 100) {
                     lastBroadcast = packetCount
@@ -173,6 +199,8 @@ class PacketCaptureVpnService : VpnService() {
             Log.e(TAG, "Error closing VPN interface", e)
         }
         vpnInterface = null
+        collector?.stop()
+        collector = null
         Log.i(TAG, "VPN capture stopped")
     }
 
