@@ -16,15 +16,15 @@ export PATH="$PATH:/root/go/bin"
 cd apps/desktop
 go-winres make
 
-env GOOS=windows GOARCH=amd64 go build -ldflags "-s -w -X main.version=$GITHUB_REF_NAME" -o ../../albiondata-client.exe -v -x .
-cd ../..
+env GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc \
+  go build -ldflags "-s -w -X main.version=$GITHUB_REF_NAME" -o ../../albiondata-client.exe -v -x .
 
-go-winres patch albiondata-client.exe
+go-winres patch ../../albiondata-client.exe
 
 cd pkg/nsis
 make nsis
 
-cd ../..
+cd ../../..
 ls -la albiondata-client*
 
 cp albiondata-client.exe albiondata-client.exe.copy
