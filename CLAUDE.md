@@ -108,6 +108,63 @@ Record any relevant decision made during work. Options:
 
 Do not implement silently. If you pick a non-obvious approach, write it down.
 
+## Multi-Agent Harness
+
+When multiple agents run in parallel, these rules are mandatory. Prose instructions without enforcement — an agent that ignores them causes merge conflicts and lost work.
+
+### Task claiming (mutex)
+
+Before an Orchestrator spawns an Implementer for a task, it MUST run:
+```bash
+backlog task edit TASK-X --status "In Progress"
+```
+This is the distributed lock. An Implementer's first action is to verify the task is "In Progress" — if not, abort and report back.
+
+Never move a task to "In Progress" speculatively. Claim only when an agent is about to start work.
+
+### Agent roles
+
+| Role | Writes code? | Writes to backlog? | Output |
+|------|--------------|--------------------|--------|
+| Orchestrator | No | Status transitions only | Spawn decisions |
+| Spike/Researcher | No | `backlog decision create`, task notes | Decision doc |
+| Implementer | Yes (worktree only) | Task notes | PR + `make check` green |
+| Reviewer | No | Task notes (findings) | LGTM or blockers |
+| Security Auditor | No | Task notes | Findings with severity |
+
+### Worktree isolation
+
+Implementer operates ONLY inside its assigned worktree (`../albiondata-client-task-<id>`).
+Never write to the main worktree or another task's worktree.
+Never push directly to master.
+
+### Signaling done
+
+1. Implementer: run `make check` → pass → open PR → `backlog task edit --status "In Review"` → stop
+2. If `make check` fails: fix and retry, max 3 attempts, then move task back to "To Do" with blocker note
+3. Reviewer: findings → if approved, comment LGTM on PR → Orchestrator merges
+4. After merge: Orchestrator runs `make check` on master → if pass, moves task to Done
+
+### Parallelism boundaries
+
+Before spawning two Implementers concurrently, Orchestrator MUST verify no file overlap:
+```bash
+git -C ../albiondata-client-task-A diff --name-only master > /tmp/scope-a.txt
+git -C ../albiondata-client-task-B diff --name-only master > /tmp/scope-b.txt
+comm -12 <(sort /tmp/scope-a.txt) <(sort /tmp/scope-b.txt)
+# Non-empty = conflict → serialize
+```
+
+**Always serialize** tasks touching: `go.mod`, `go.work`, `AndroidManifest.xml`, `Info.plist`, exported types in `collector/`.
+
+### Escalation
+
+Any agent blocked for >2 tool-call cycles on the same problem: stop, move task to "To Do", add implementation note with blocker description, report to Orchestrator. Do not spin.
+
+### Security Auditor trigger
+
+Spawn Security Auditor (read-only) on any task with scope touching: VPN service, OS permissions, auth tokens, network trust boundaries, file storage on device. CRITICAL findings block merge.
+
 ## Commits and branches
 
 Conventional Commits. Format: `type(scope): description`
