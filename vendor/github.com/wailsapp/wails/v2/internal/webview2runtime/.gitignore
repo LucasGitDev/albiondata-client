@@ -1,0 +1,3 @@
+# This file is embedded via //go:embed in webview2installer.go.
+# The root .gitignore excludes *.exe; un-exclude this specific file.
+!MicrosoftEdgeWebview2Setup.exe
