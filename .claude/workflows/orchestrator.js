@@ -7,8 +7,9 @@ export const meta = {
     { title: 'Spikes', detail: 'Run research agents in parallel' },
     { title: 'Implement', detail: 'Run implementer agents (parallelism-safe)' },
     { title: 'Review', detail: 'Reviewer + optional security auditor per task' },
-    { title: 'Merge', detail: 'Poll for user merges, verify master' },
-    { title: 'Finalize', detail: 'AC/DoD check, decisions, final summary, mark Done' },
+    { title: 'Fix', detail: 'Fix review/CI failures and re-queue for review (max 2 attempts)' },
+    { title: 'Merge', detail: 'Auto-merge approved PRs, verify master after each' },
+    { title: 'Finalize', detail: 'AC/DoD check, decisions, final summary, mark Done, cleanup worktrees' },
     { title: 'Summary', detail: 'Report results and remaining board state' },
   ],
 }
@@ -161,6 +162,7 @@ const allReviewResults = []
 const allMergedTaskIds = []
 const allFinalizedTaskIds = []
 const seenTaskIds = new Set()
+const fixAttempts = {}  // task_id → number of fix attempts made
 
 // ─── Main loop ──────────────────────────────────────────────────────────────
 // Runs until: nothing eligible AND nothing in-review (everything blocked or done)
@@ -515,50 +517,145 @@ CRITICAL findings block merge.`,
     )).filter(Boolean)
 
     allReviewResults.push(...iterReviewResults)
+
+    // ── Phase: Fix (review BLOCKED) ──────────────────────────────────────────
+    const reviewBlocked = iterReviewResults.filter(r => !r.merge_ready)
+    const fixable = reviewBlocked.filter(r => (fixAttempts[r.task_id] || 0) < 2)
+
+    if (fixable.length > 0) {
+      phase('Fix')
+      log(`${fixable.length} PR(s) need fixes — spawning fixer agents`)
+
+      await parallel(
+        fixable.map(r => async () => {
+          fixAttempts[r.task_id] = (fixAttempts[r.task_id] || 0) + 1
+          const worktree = worktreePath(r.task_id)
+          const allFindings = [r.findings, r.security_findings].filter(Boolean).join('\n')
+
+          const fixResult = await agent(
+            `You are a Fixer agent addressing review/CI failures for ${r.task_id}.
+
+Worktree: ${worktree}
+Main repo: ${ROOT}
+Attempt: ${fixAttempts[r.task_id]} of 2
+
+Review verdict: ${r.verdict}
+Findings to fix:
+${allFindings}
+
+Steps:
+1. Read task: \`backlog task view ${r.task_id} --plain\` (from ${ROOT})
+2. Check CI failures: \`gh pr checks $(gh pr list --search "${r.task_id}" --json number --jq '.[0].number') 2>/dev/null\`
+3. Fix ALL findings — work only in ${worktree}
+4. Run quality gate: \`cd ${ROOT} && make check\` — must pass before pushing
+5. Commit fixes (Conventional Commits, no Co-Authored-By) and push: \`cd ${worktree} && git push\`
+6. Add note: \`backlog task edit ${r.task_id} --notes "Fix attempt ${fixAttempts[r.task_id]}: <what was fixed>"\` (from ${ROOT})
+
+If make check fails after 2 attempts: \`backlog task edit ${r.task_id} --status "To Do" --notes "Fixer blocked: <reason>"\`
+
+Return: { task_id: "${r.task_id}", fixed: true/false, blocker: "reason if not fixed" }`,
+            {
+              label: `fix:${r.task_id}:${fixAttempts[r.task_id]}`,
+              phase: 'Fix',
+              schema: {
+                type: 'object',
+                properties: {
+                  task_id: { type: 'string' },
+                  fixed: { type: 'boolean' },
+                  blocker: { type: 'string' },
+                },
+                required: ['task_id', 'fixed'],
+              },
+              agentType: 'general-purpose',
+            }
+          )
+
+          if (fixResult && fixResult.fixed) {
+            // Re-add to seen so review runs again next iteration
+            seenTaskIds.delete(r.task_id)
+            // Remove stale review result so fresh review runs
+            const idx = allReviewResults.findIndex(x => x.task_id === r.task_id)
+            if (idx !== -1) allReviewResults.splice(idx, 1)
+            log(`Fixed ${r.task_id} — will re-review next iteration`)
+          } else if (fixResult) {
+            log(`Fixer blocked on ${r.task_id}: ${fixResult.blocker || 'unknown'}`)
+          }
+        })
+      )
+    }
+
+    const exhausted = reviewBlocked.filter(r => (fixAttempts[r.task_id] || 0) >= 2)
+    if (exhausted.length > 0) {
+      log(`Exhausted fix attempts (2/2): ${exhausted.map(r => r.task_id).join(', ')} — moved to To Do`)
+    }
   }
 
-  // ── Phase: Merge poll ─────────────────────────────────────────────────────
+  // ── Phase: Merge ─────────────────────────────────────────────────────────
 
   const mergeReady = allReviewResults.filter(r => r.merge_ready && !allMergedTaskIds.includes(r.task_id))
 
   if (mergeReady.length > 0) {
     phase('Merge')
-    log(`${mergeReady.length} PR(s) ready to merge:`)
-    mergeReady.forEach(r => log(`  ${r.task_id}: ${r.pr_url || '(url via gh pr list)'}`))
-    log('Polling for merges (user must approve in GitHub)...')
+    log(`${mergeReady.length} PR(s) approved — merging automatically`)
 
-    // Poll a few times then continue — don't block the loop
-    for (let p = 0; p < 3; p++) {
-      const mergeStatus = await agent(
-        `Check merge status for these PRs:
-${mergeReady.map(r => `- ${r.task_id}: ${r.pr_url || 'find via gh pr list'}`).join('\n')}
+    // Merge sequentially to keep master clean
+    for (const r of mergeReady) {
+      const mergeResult = await agent(
+        `Merge approved PR for ${r.task_id} and verify master.
 
-For each: \`gh pr view <number> --json state,mergedAt --jq '{number,state,mergedAt}'\`
-After any detected merge: \`cd ${ROOT} && git pull && make check\`
+PR: ${r.pr_url || 'find via: gh pr list --search "' + r.task_id + '" --json number,url'}
+Main repo: ${ROOT}
 
-Return: { merged: ["TASK-X",...], pending: ["TASK-Y",...], make_check_passed: true/false }`,
+Steps:
+1. Find PR number if not known: \`gh pr list --search "${r.task_id}" --json number,headRefName,url --jq '.[0]'\`
+2. Check CI status: \`gh pr checks <number>\` — if checks are failing, do NOT merge; return merged=false with reason
+3. Merge: \`gh pr merge <number> --merge --delete-branch\`
+4. Pull master: \`cd ${ROOT} && git pull\`
+5. Run quality gate: \`cd ${ROOT} && make check\`
+6. Return result
+
+Return: { task_id: "${r.task_id}", merged: true/false, make_check_passed: true/false, reason: "why if not merged" }`,
         {
-          label: `merge-poll:${iteration}-${p}`,
+          label: `merge:${r.task_id}`,
           phase: 'Merge',
           schema: {
             type: 'object',
             properties: {
-              merged: { type: 'array', items: { type: 'string' } },
-              pending: { type: 'array', items: { type: 'string' } },
+              task_id: { type: 'string' },
+              merged: { type: 'boolean' },
               make_check_passed: { type: 'boolean' },
+              reason: { type: 'string' },
             },
-            required: ['merged', 'pending', 'make_check_passed'],
+            required: ['task_id', 'merged', 'make_check_passed'],
           },
           agentType: 'general-purpose',
         }
       )
 
-      if (mergeStatus && mergeStatus.merged.length > 0) {
-        allMergedTaskIds.push(...mergeStatus.merged.filter(id => !allMergedTaskIds.includes(id)))
-        if (!mergeStatus.make_check_passed) {
-          log(`WARNING: make check failed on master after merge — tasks held from Done`)
+      if (mergeResult && mergeResult.merged) {
+        allMergedTaskIds.push(r.task_id)
+        if (!mergeResult.make_check_passed) {
+          log(`WARNING: make check failed on master after merging ${r.task_id}`)
+        } else {
+          log(`Merged ${r.task_id} — master green`)
         }
-        if (mergeStatus.pending.length === 0) break
+      } else if (mergeResult && !mergeResult.merged) {
+        // CI failing — trigger fixer if attempts remain
+        const attempts = fixAttempts[r.task_id] || 0
+        if (attempts < 2) {
+          log(`CI failing on ${r.task_id} (attempt ${attempts + 1}/2) — queuing fixer`)
+          fixAttempts[r.task_id] = attempts + 1
+          // Remove from allReviewResults so fixer + re-review runs next iteration
+          const idx = allReviewResults.findIndex(x => x.task_id === r.task_id)
+          if (idx !== -1) allReviewResults.splice(idx, 1)
+          seenTaskIds.delete(r.task_id)
+        } else {
+          log(`CI still failing after 2 fix attempts on ${r.task_id} — moving to To Do`)
+          await agent(
+            `cd ${ROOT} && backlog task edit ${r.task_id} --status "To Do" --notes "CI fix exhausted after 2 attempts: ${mergeResult.reason || 'checks failing'}"`,
+            { label: `reset-exhausted:${r.task_id}`, phase: 'Merge', agentType: 'general-purpose' }
+          )
+        }
       }
     }
   }
@@ -603,6 +700,34 @@ Follow finalization guide:
     )
 
     log(`Finalized: ${allFinalizedTaskIds.length} total`)
+
+    // ── Cleanup worktrees for finalized tasks ─────────────────────────────────
+    const toClean = toFinalize.filter(id => allFinalizedTaskIds.includes(id))
+    if (toClean.length > 0) {
+      await agent(
+        `Clean up git worktrees for finalized tasks. These tasks are Done and merged — their worktrees are no longer needed.
+
+Main repo: ${ROOT}
+Tasks to clean: ${toClean.join(', ')}
+
+For each task ID:
+1. Worktree path: ${ROOT}/../albiondata-client-task-<task-id-lowercase>
+   Example for TASK-5: ${ROOT}/../albiondata-client-task-task-5
+2. Remove worktree: \`git -C ${ROOT} worktree remove <path> --force 2>/dev/null || true\`
+3. Delete local branch if it still exists: \`git -C ${ROOT} branch -d <branch> 2>/dev/null || true\`
+
+Also prune stale worktree metadata: \`git -C ${ROOT} worktree prune\`
+List remaining worktrees: \`git -C ${ROOT} worktree list\`
+
+Do not remove the main worktree (${ROOT} itself).`,
+        {
+          label: `cleanup:${iteration}`,
+          phase: 'Finalize',
+          agentType: 'general-purpose',
+        }
+      )
+      log(`Cleaned worktrees: ${toClean.join(', ')}`)
+    }
   }
 
   // Continue loop — next iteration picks up newly unblocked tasks
