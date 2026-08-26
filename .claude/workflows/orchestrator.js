@@ -1,12 +1,14 @@
 export const meta = {
   name: 'orchestrator',
-  description: 'Coordinate multi-agent task execution: scan backlog, run spikes in parallel, implement, review',
+  description: 'Coordinate multi-agent task execution: scan backlog, run spikes in parallel, implement, review, finalize',
   phases: [
     { title: 'Scan', detail: 'Read backlog state and plan execution' },
     { title: 'Spikes', detail: 'Run research agents in parallel' },
     { title: 'Implement', detail: 'Run implementer agents (parallelism-safe)' },
     { title: 'Review', detail: 'Run reviewer + optional security auditor per task' },
-    { title: 'Summary', detail: 'Report results and pending merges' },
+    { title: 'Merge', detail: 'Wait for user merge approval, verify master' },
+    { title: 'Finalize', detail: 'Check AC/DoD, record decisions, write final summary, mark Done' },
+    { title: 'Summary', detail: 'Report results' },
   ],
 }
 
@@ -428,15 +430,106 @@ Output: SECURITY: PASS or SECURITY: BLOCKED — <findings>`,
   })
 )
 
-// ─── Phase 5: Summary ───────────────────────────────────────────────────────
+// ─── Phase 5: Merge gate ────────────────────────────────────────────────────
 
-phase('Summary')
+phase('Merge')
 
 const reviewed = reviewResults.filter(Boolean)
 const mergeReady = reviewed.filter(r => r.merge_ready)
 const reviewBlocked = reviewed.filter(r => !r.merge_ready)
 
 log(`Review complete: ${mergeReady.length} ready to merge, ${reviewBlocked.length} blocked`)
+
+// Orchestrator cannot push to master — user must approve merge.
+// We poll until merged PRs appear on master, then run finalization.
+let mergedTaskIds = []
+
+if (mergeReady.length > 0) {
+  log(`Waiting for user to merge ${mergeReady.length} PR(s)...`)
+  log(`PRs ready:\n${mergeReady.map(r => `  ${r.task_id}: ${r.pr_url}`).join('\n')}`)
+
+  // Poll until all ready PRs are merged or budget runs out
+  const maxPolls = 12 // ~12 checks
+  for (let i = 0; i < maxPolls; i++) {
+    const mergeStatus = await agent(
+      `Check if these PRs are merged into master:
+${mergeReady.map(r => `- PR: ${r.pr_url} (${r.task_id})`).join('\n')}
+
+For each PR run: gh pr view <number> --json state,mergedAt --jq '{state,mergedAt}'
+Also run: make check on master after any merge: cd ${ROOT} && git pull && make check
+
+Return JSON: { merged: ["TASK-X", ...], pending: ["TASK-Y", ...], make_check_passed: true/false }`,
+      {
+        label: `merge:poll-${i}`,
+        phase: 'Merge',
+        schema: {
+          type: 'object',
+          properties: {
+            merged: { type: 'array', items: { type: 'string' } },
+            pending: { type: 'array', items: { type: 'string' } },
+            make_check_passed: { type: 'boolean' },
+          },
+          required: ['merged', 'pending', 'make_check_passed'],
+        },
+        agentType: 'orchestrator',
+      }
+    )
+
+    if (mergeStatus) {
+      mergedTaskIds = mergeStatus.merged
+      if (!mergeStatus.make_check_passed && mergeStatus.merged.length > 0) {
+        log(`WARNING: make check failed on master after merge — tasks NOT moving to Done`)
+      }
+      if (mergeStatus.pending.length === 0 || mergedTaskIds.length === mergeReady.length) {
+        break
+      }
+    }
+  }
+}
+
+// ─── Phase 6: Finalize ──────────────────────────────────────────────────────
+
+phase('Finalize')
+
+const toFinalize = [
+  ...spikeResults.filter(r => r.status === 'done').map(r => r.task_id),
+  ...mergedTaskIds,
+]
+
+const finalizationResults = await parallel(
+  toFinalize.map(taskId => async () =>
+    agent(
+      `You are a Finalizer agent closing task ${taskId} after successful merge and make check on master.
+
+Task ID: ${taskId}
+Main repo: ${ROOT}
+
+Follow the finalization guide exactly:
+1. backlog instructions task-finalization
+2. backlog task view ${taskId} --plain
+3. Verify each acceptance criterion with objective evidence (run commands, check output)
+4. Check AC items: backlog task edit ${taskId} --check-ac <n> (only with evidence)
+5. Check DoD items: backlog task edit ${taskId} --check-dod <n>
+6. Create any missing backlog decisions: backlog decision create "..."
+7. Append final notes: backlog task edit ${taskId} --append-notes "..."
+8. Write final summary: backlog task edit ${taskId} --final-summary "..."
+9. Move to Done: backlog task edit ${taskId} --status "Done"
+
+Be thorough — this is the permanent record of the task.`,
+      {
+        label: `finalize:${taskId}`,
+        phase: 'Finalize',
+        agentType: 'finalizer',
+      }
+    )
+  )
+)
+
+log(`Finalized ${finalizationResults.filter(Boolean).length}/${toFinalize.length} tasks`)
+
+// ─── Phase 7: Summary ───────────────────────────────────────────────────────
+
+phase('Summary')
 
 return {
   spikes: {
@@ -464,8 +557,11 @@ return {
       security_findings: r.security_findings,
     })),
   },
+  finalized: toFinalize,
   blocked_tasks: scan.blocked_tasks,
-  action_required: mergeReady.length > 0
-    ? `Merge these PRs, then run \`make check\` on master, then move tasks to Done:\n${mergeReady.map(r => `  - ${r.task_id}: ${r.pr_url}`).join('\n')}`
-    : 'No PRs ready to merge.',
+  action_required: reviewBlocked.length > 0
+    ? `Fix review blockers:\n${reviewBlocked.map(r => `  ${r.task_id}: ${r.findings}`).join('\n')}`
+    : mergeReady.length > 0 && mergedTaskIds.length < mergeReady.length
+      ? `Still pending merge:\n${mergeReady.filter(r => !mergedTaskIds.includes(r.task_id)).map(r => `  ${r.task_id}: ${r.pr_url}`).join('\n')}`
+      : 'All tasks finalized.',
 }

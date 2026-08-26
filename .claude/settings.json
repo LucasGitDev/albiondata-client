@@ -1,4 +1,19 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(backlog *)",
+      "Bash(gh pr *)",
+      "Bash(gh issue *)",
+      "Bash(gh repo *)",
+      "Bash(gh auth status)",
+      "Bash(git worktree *)",
+      "Bash(git -C * diff *)",
+      "Bash(git -C * log *)",
+      "Bash(git -C * status)",
+      "Bash(make check)",
+      "Bash(make build-*)"
+    ]
+  },
   "hooks": {
     "Stop": [
       {
