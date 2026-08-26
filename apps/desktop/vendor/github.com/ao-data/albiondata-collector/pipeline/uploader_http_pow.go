@@ -39,8 +39,8 @@ func newHTTPUploaderPow(url string) uploader {
 		runtime.GOMAXPROCS(procs)
 	}
 
-	url = strings.Replace(url, "https+pow", "https", -1)
-	url = strings.Replace(url, "http+pow", "http", -1)
+	url = strings.ReplaceAll(url, "https+pow", "https")
+	url = strings.ReplaceAll(url, "http+pow", "http")
 
 	return &httpUploaderPow{
 		baseURL:   url,
@@ -61,17 +61,15 @@ func (u *httpUploaderPow) getPow(target interface{}) {
 		log.Printf("Error in Pow Get request: %v", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		log.Printf("Got bad response code: %v", resp.StatusCode)
 		return
 	}
 
-	json.NewDecoder(resp.Body).Decode(target)
-	if err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
 		log.Printf("Error in parsing Pow Get request: %v", err)
-		return
 	}
 }
 
@@ -99,7 +97,7 @@ func (u *httpUploaderPow) uploadWithPow(pow Pow, solution string, natsmsg []byte
 		return
 	}
 
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		body, err := ioutil.ReadAll(resp.Body)
@@ -128,7 +126,7 @@ func toBinaryBytes(s string) string {
 	for i := 0; i < len(s); i++ {
 		fmt.Fprintf(&buffer, "%08b", s[i])
 	}
-	return fmt.Sprintf("%s", buffer.Bytes())
+	return buffer.String()
 }
 
 // Solves a pow looping through possible solutions
