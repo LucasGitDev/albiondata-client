@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -38,6 +39,7 @@ fun StatusScreen(
     onStartCapture: () -> Unit = {},
     onStopCapture: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    onOpenLogs: () -> Unit = {},
     onLoginRequired: () -> Unit = {},
 ) {
     val settings = uiState.settings
@@ -49,6 +51,9 @@ fun StatusScreen(
             TopAppBar(
                 title = { Text("Albion Data Client") },
                 actions = {
+                    IconButton(onClick = onOpenLogs) {
+                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Logs")
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
