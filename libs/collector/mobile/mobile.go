@@ -21,19 +21,15 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"net"
 	"sync"
 
 	"github.com/ao-data/albiondata-collector/pipeline"
-	"log"
 )
 
-// albionUDPPort is the Photon server port used by Albion Online.
-const albionUDPPort = 5056
-
-// packetChannelSize is the buffer depth for the raw-packet relay channel.
-// Sized to absorb a burst of packets without blocking the VPN read loop.
-const packetChannelSize = 256
+const (
+	// albionUDPPort is the well-known Albion Online game server UDP port.
+	albionUDPPort = 5056
+)
 
 // MobileCollector is a gomobile-safe lifecycle controller for Albion packet capture.
 // It wraps the platform-agnostic collector with an API that is fully expressible
@@ -46,8 +42,8 @@ type MobileCollector struct {
 	authToken string
 	running   bool
 	cancel    context.CancelFunc
-	packetCh  chan []byte
 	lastError string
+	handler   *pipeline.Handler
 }
 
 // NewMobileCollector creates a MobileCollector ready to start.
@@ -72,9 +68,12 @@ func (m *MobileCollector) SetAuthToken(token string) {
 	m.authToken = token
 }
 
-// Start begins packet capture. The VPN service must call ProcessPacket with each
-// raw IP packet read from the TUN file descriptor.
+// Start begins packet capture using the VPN tunnel supplied by the Android VPN service.
 // Returns an error if capture is already running or configuration is invalid.
+// On success, returns nil.
+//
+// Capture runs in the background; call Stop to terminate it.
+// Feed raw IP packets via FeedPacket.
 func (m *MobileCollector) Start() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -88,18 +87,17 @@ func (m *MobileCollector) Start() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	m.packetCh = make(chan []byte, packetChannelSize)
 	m.running = true
 	m.lastError = ""
 
 	ingestURL := m.ingestURL
 	authToken := m.authToken
-	packetCh := m.packetCh
 
 	go func() {
-		err := runCapture(ctx, ingestURL, authToken, packetCh)
+		err := m.runCapture(ctx, ingestURL, authToken)
 		m.mu.Lock()
 		m.running = false
+		m.handler = nil
 		if err != nil && err != context.Canceled {
 			m.lastError = err.Error()
 		}
@@ -107,36 +105,6 @@ func (m *MobileCollector) Start() error {
 	}()
 
 	return nil
-}
-
-// ProcessPacket delivers a raw IP packet (as read from the TUN fd) to the Go
-// collector for Photon parsing and upload. The data is copied internally so the
-// caller's buffer may be reused immediately after this call returns.
-//
-// Returns an error if the collector is not running or the internal buffer is full.
-// A full-buffer error is non-fatal; the packet is dropped and capture continues.
-func (m *MobileCollector) ProcessPacket(data []byte) error {
-	m.mu.Lock()
-	ch := m.packetCh
-	running := m.running
-	m.mu.Unlock()
-
-	if !running || ch == nil {
-		return fmt.Errorf("collector: not running")
-	}
-
-	// Copy so the caller can reuse its buffer.
-	pkt := make([]byte, len(data))
-	copy(pkt, data)
-
-	select {
-	case ch <- pkt:
-		return nil
-	default:
-		// Buffer full — drop packet rather than block the VPN read loop.
-		log.Println("collector: packet channel full, dropping packet")
-		return nil
-	}
 }
 
 // Stop terminates packet capture gracefully.
@@ -167,12 +135,33 @@ func (m *MobileCollector) LastError() string {
 	return m.lastError
 }
 
-// runCapture is the mobile capture implementation.
-// It creates a pipeline.Handler, configures it, then relays packets from packetCh
-// to the Photon parser until ctx is cancelled.
-func runCapture(ctx context.Context, ingestURL, authToken string, packetCh <-chan []byte) error {
-	// Configure the pipeline's global config for this session.
+// FeedPacket delivers a raw IPv4 packet read from the VPN TUN file descriptor.
+// The Android VpnService reads each IP packet and calls this method. Only UDP
+// packets destined for albionUDPPort are forwarded to the Photon parser.
+//
+// Safe to call from any goroutine, including the packet-capture thread.
+func (m *MobileCollector) FeedPacket(data []byte) {
+	m.mu.Lock()
+	h := m.handler
+	m.mu.Unlock()
+	if h == nil {
+		return
+	}
+
+	payload, srcIP := extractUDPPayload(data)
+	if payload == nil {
+		return
+	}
+	if srcIP != "" {
+		h.SetGameServerIP(srcIP)
+	}
+	h.ReceivePayload(payload)
+}
+
+// runCapture initialises the pipeline and blocks until ctx is cancelled.
+func (m *MobileCollector) runCapture(ctx context.Context, ingestURL, authToken string) error {
 	pipeline.ConfigGlobal.PublicIngestBaseUrls = ingestURL
+	pipeline.ConfigGlobal.Version = "mobile"
 	if authToken != "" {
 		pipeline.ConfigGlobal.PrivateIngestBaseUrls = ingestURL
 		pipeline.PrivateAuthToken = authToken
@@ -180,74 +169,66 @@ func runCapture(ctx context.Context, ingestURL, authToken string, packetCh <-cha
 		pipeline.ConfigGlobal.PrivateIngestBaseUrls = ""
 		pipeline.PrivateAuthToken = ""
 	}
-	pipeline.ConfigGlobal.DisableUpload = false
-	pipeline.ConfigGlobal.Debug = true // log only; no pop-ups on mobile
 
 	h := pipeline.NewHandler()
 	h.Start()
-	defer h.Stop()
 
-	log.Printf("collector/mobile: capture started, ingest=%s", ingestURL)
+	m.mu.Lock()
+	m.handler = h
+	m.mu.Unlock()
 
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("collector/mobile: capture stopped")
-			return ctx.Err()
-		case pkt, ok := <-packetCh:
-			if !ok {
-				return nil
-			}
-			srcIP, payload, err := extractUDPPayload(pkt)
-			if err != nil {
-				// Not an Albion packet — silently skip.
-				continue
-			}
-			h.SetGameServerIP(srcIP)
-			h.ReceivePayload(payload)
-		}
-	}
+	<-ctx.Done()
+
+	h.Stop()
+	return ctx.Err()
 }
 
-// extractUDPPayload parses a raw IPv4 packet and returns the source IP string
-// and UDP payload bytes when the destination port matches albionUDPPort.
-// Returns an error for any non-matching or malformed packet.
-func extractUDPPayload(pkt []byte) (srcIP string, payload []byte, err error) {
-	// Minimum IPv4 header is 20 bytes; need at least that plus 8-byte UDP header.
-	if len(pkt) < 28 {
-		return "", nil, fmt.Errorf("packet too short")
+// extractUDPPayload parses a raw IPv4 packet and returns the UDP payload and
+// source IP string if the packet is a UDP datagram on albionUDPPort.
+// Returns nil, "" for non-matching or malformed packets.
+func extractUDPPayload(packet []byte) (payload []byte, srcIP string) {
+	// Minimum IPv4 header is 20 bytes.
+	if len(packet) < 20 {
+		return nil, ""
 	}
 
-	version := pkt[0] >> 4
+	// Version/IHL byte: upper nibble must be 4 (IPv4).
+	version := packet[0] >> 4
 	if version != 4 {
-		return "", nil, fmt.Errorf("not IPv4")
+		return nil, ""
 	}
 
-	ihl := int(pkt[0]&0x0f) * 4
-	if ihl < 20 || len(pkt) < ihl+8 {
-		return "", nil, fmt.Errorf("malformed IPv4 header")
+	// Protocol: 17 = UDP.
+	if packet[9] != 17 {
+		return nil, ""
 	}
 
-	protocol := pkt[9]
-	if protocol != 17 { // UDP
-		return "", nil, fmt.Errorf("not UDP")
+	// IP header length in 32-bit words.
+	ihl := int(packet[0]&0x0f) * 4
+	if ihl < 20 || len(packet) < ihl+8 {
+		return nil, ""
 	}
 
-	src := net.IP(pkt[12:16])
-	udpHeader := pkt[ihl:]
+	// Source IP (bytes 12–15).
+	src := fmt.Sprintf("%d.%d.%d.%d", packet[12], packet[13], packet[14], packet[15])
 
-	dstPort := binary.BigEndian.Uint16(udpHeader[2:4])
-	if dstPort != albionUDPPort {
-		srcPort := binary.BigEndian.Uint16(udpHeader[0:2])
-		if srcPort != albionUDPPort {
-			return "", nil, fmt.Errorf("not Albion port")
-		}
+	// UDP header starts after IP header.
+	udp := packet[ihl:]
+	if len(udp) < 8 {
+		return nil, ""
 	}
 
-	udpLen := int(binary.BigEndian.Uint16(udpHeader[4:6]))
-	if udpLen < 8 || ihl+udpLen > len(pkt) {
-		return "", nil, fmt.Errorf("malformed UDP header")
+	// UDP source port (bytes 0–1) and destination port (bytes 2–3).
+	srcPort := binary.BigEndian.Uint16(udp[0:2])
+	dstPort := binary.BigEndian.Uint16(udp[2:4])
+	if srcPort != albionUDPPort && dstPort != albionUDPPort {
+		return nil, ""
 	}
 
-	return src.String(), udpHeader[8 : udpLen], nil
+	udpPayloadLen := binary.BigEndian.Uint16(udp[4:6])
+	if udpPayloadLen < 8 || int(udpPayloadLen) > len(udp) {
+		return nil, ""
+	}
+
+	return udp[8:udpPayloadLen], src
 }
